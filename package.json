@@ -1,0 +1,32 @@
+{
+  "name": "speranto",
+  "version": "1.0.0",
+  "description": "A quick and simple machine translation tool for i18n in webapps",
+  "module": "index.ts",
+  "type": "module",
+  "bin": {
+    "speranto": "./src/cli.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun build src/cli.ts --outdir dist --target bun"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@types/glob": "^9.0.0",
+    "@types/mdast": "^4.0.4",
+    "commander": "^14.0.0",
+    "glob": "^11.0.3",
+    "ollama": "^0.5.16",
+    "remark": "^15.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-stringify": "^11.0.0",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.0.0"
+  }
+}

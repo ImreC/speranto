@@ -1,0 +1,8 @@
+export interface Config {
+  model: string;
+  temperature: number;
+  sourceLang: string;
+  targetLangs: string[];
+  sourceDir: string;
+  targetDir: string;
+}

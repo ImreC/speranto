@@ -1,2 +1,3 @@
 # speranto
-A LLM based framework for quickly translating text for i18n
+
+A quick and simple machine translation tool for i18n in webapps
