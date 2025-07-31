@@ -1,20 +1,36 @@
-import ollama from "ollama";
 import { join } from "path";
+import { LLMInterface, OllamaProvider, OpenAIProvider } from "./interface";
 
 interface TranslatorOptions {
   model: string;
   temperature: number;
   sourceLang: string;
   targetLang: string;
+  provider?: "ollama" | "openai";
+  apiKey?: string;
 }
 
 export class Translator {
   private options: TranslatorOptions;
   private languageInstructions: string | null = null;
+  private llm: LLMInterface;
 
   constructor(options: TranslatorOptions) {
     this.options = options;
+    this.llm = this.createLLMProvider();
     this.loadLanguageInstructions();
+  }
+
+  private createLLMProvider(): LLMInterface {
+    const provider = this.options.provider || "ollama";
+
+    switch (provider) {
+      case "openai":
+        return new OpenAIProvider(this.options.model, this.options.apiKey);
+      case "ollama":
+      default:
+        return new OllamaProvider(this.options.model);
+    }
   }
 
   private async loadLanguageInstructions(): Promise<void> {
@@ -45,6 +61,8 @@ export class Translator {
 
   async translateText(text: string): Promise<string> {
     if (!text.trim()) return text;
+    await this.llm.isModelLoaded();
+
     try {
       let prompt = `Translate: "${text}" from ${this.options.sourceLang} to ${this.options.targetLang}.`;
 
@@ -54,19 +72,13 @@ export class Translator {
 
       prompt += `\n\nRespond with only the translation.`;
 
-      const response = await ollama.generate({
-        model: this.options.model,
-        prompt: prompt,
-        options: {
-          temperature: this.options.temperature,
-        },
+      const response = await this.llm.generate(prompt, {
+        temperature: this.options.temperature,
       });
       console.log(
-        `Translated text ${text} to ${
-          this.options.targetLang
-        }: ${response.response.trim()}`
+        `Translated text ${text} to ${this.options.targetLang}: ${response.content}`
       );
-      return response.response.trim();
+      return response.content;
     } catch (error) {
       console.error(`Translation error for text: "${text}"`, error);
       throw error;

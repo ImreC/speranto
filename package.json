@@ -23,6 +23,7 @@
     "commander": "^14.0.0",
     "glob": "^11.0.3",
     "ollama": "^0.5.16",
+    "openai": "^5.11.0",
     "remark": "^15.0.1",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
