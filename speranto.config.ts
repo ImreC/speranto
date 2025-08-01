@@ -1,8 +1,8 @@
 export default {
-  model: "gemma3n:latest",
+  model: 'mistral-small3.2:24b',
   temperature: 0.0,
-  sourceLang: "en",
-  targetLangs: ["nl"],
-  sourceDir: "./content/blog/en",
-  targetDir: "./content/blog/[lang]",
-};
+  sourceLang: 'en',
+  targetLangs: ['nl'],
+  sourceDir: './content/blog/en',
+  targetDir: './content/blog/[lang]',
+}
