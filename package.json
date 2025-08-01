@@ -12,7 +12,8 @@
     "build": "bun build src/cli.ts --outdir dist --target bun"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@vitest/ui": "^3.2.4"
   },
   "peerDependencies": {
     "typescript": "^5"

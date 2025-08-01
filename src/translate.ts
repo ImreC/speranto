@@ -1,11 +1,16 @@
 import { glob } from 'glob'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join, dirname, relative } from 'path'
-// import { parseMarkdown, stringifyMarkdown } from './parser'
+import {
+  getTranslatableChunks,
+  parseMarkdown,
+  stringifyMarkdown,
+  type TranslatableChunk,
+} from './parser'
 import { Translator } from './translator'
 // import { visit } from 'unist-util-visit'
 import type { Config } from './types'
-// import type { Root, Text } from 'mdast'
+import type { Root, Text, BlockContent } from 'mdast'
 
 export async function translate(config: Config) {
   const pattern = join(config.sourceDir, '**/*.md')
@@ -44,29 +49,48 @@ async function translateFile(
     console.log(`Reading source file ${filePath}`)
     const content = await readFile(filePath, 'utf-8')
 
-    // // Parse markdown
-    // const tree = await parseMarkdown(content)
+    // Parse markdown
+    const tree = await parseMarkdown(content)
+    const chunks = await getTranslatableChunks(tree)
 
-    // // Create a deep copy of the tree for translation
-    // const translatedTree: Root = JSON.parse(JSON.stringify(tree))
+    console.log(`Created ${chunks.length} chunks`)
 
-    // // Translate all text nodes
-    // const promises: Promise<void>[] = []
+    // Create a deep copy of the tree for translation
+    const translatedTree: Root = JSON.parse(JSON.stringify(tree))
 
-    // visit(translatedTree, 'text', (node: Text) => {
-    //   if (node.value.trim()) {
-    //     promises.push(
-    //       translator.translateText(node.value).then((translated) => {
-    //         node.value = translated
-    //       }),
-    //     )
-    //   }
-    // })
+    // Translate chunks
+    const translatedChunks: TranslatableChunk[] = []
 
-    // // Wait for all translations to complete
-    // await Promise.all(promises)
+    for (const chunk of chunks) {
+      const translatedText = await translator.translateChunk(chunk)
+      translatedChunks.push({
+        ...chunk,
+        text: translatedText,
+      })
+    }
 
-    let translatedContent = await translator.translateText(content)
+    // Reconstruct the tree with translated content
+    for (const translatedChunk of translatedChunks) {
+      // Parse the translated text back to nodes
+      const translatedNodes = await parseMarkdown(translatedChunk.text)
+
+      // Replace the nodes in the translated tree
+      let nodeIndex = 0
+      for (
+        let i = translatedChunk.startIndex;
+        i <= translatedChunk.endIndex && i < translatedTree.children.length;
+        i++
+      ) {
+        if (nodeIndex < translatedNodes.children.length) {
+          translatedTree.children[i] = translatedNodes.children[nodeIndex] as BlockContent
+          nodeIndex++
+        }
+      }
+    }
+
+    // Stringify the translated tree
+    let translatedContent = await stringifyMarkdown(translatedTree)
+
     // Generate output path
     const relativePath = relative(config.sourceDir, filePath)
     const targetPath = join(config.targetDir.replace('[lang]', targetLang), relativePath)
@@ -77,8 +101,7 @@ async function translateFile(
 
     translatedContent += `\n\nTranslated automatically with ${config.model}. The original content was written in ${config.sourceLang}. Please allow for minor errors.`
 
-    // Stringify and write the translated markdown
-    // const translatedContent = await stringifyMarkdown(translatedTree)
+    // Write the translated markdown
     await writeFile(targetPath, translatedContent, 'utf-8')
 
     console.log(`Translated ${relativePath} -> ${targetLang}`)

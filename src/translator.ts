@@ -1,5 +1,6 @@
 import { join } from 'path'
 import { LLMInterface, OllamaProvider, OpenAIProvider } from './interface'
+import type { TranslatableChunk } from './parser'
 
 interface TranslatorOptions {
   model: string
@@ -79,6 +80,42 @@ export class Translator {
       return response.content
     } catch (error) {
       console.error(`Translation error for text: "${text}"`, error)
+      throw error
+    }
+  }
+
+  async translateChunk(chunk: TranslatableChunk): Promise<string> {
+    if (!chunk.text.trim()) return chunk.text
+    console.log(`Translating chunk with context: ${chunk.context || 'text'}`)
+    await this.isModelReady
+
+    try {
+      let prompt = `Translate the following ${chunk.context || 'text'} from ${
+        this.options.sourceLang
+      } to ${this.options.targetLang}:\n\n${chunk.text}`
+
+      if (this.languageInstructions) {
+        prompt += `\n\nFollow these language-specific guidelines:\n${this.languageInstructions}`
+      }
+
+      // Add context-specific instructions
+      if (chunk.context === 'code') {
+        prompt += `\n\nThis is a code block. Only translate comments and documentation strings, not the code itself.`
+      } else if (chunk.context === 'list-with-context') {
+        prompt += `\n\nThis is a list with surrounding context. Maintain the list structure and ensure the translation flows naturally with the context.`
+      } else if (chunk.context === 'section') {
+        prompt += `\n\nThis is a complete section. Ensure consistency in terminology throughout the section.`
+      }
+
+      prompt += `\n\nProvide only the translated content, maintaining the exact same markdown formatting and structure.`
+
+      const response = await this.llm.generate(prompt, {
+        temperature: this.options.temperature,
+      })
+
+      return response.content
+    } catch (error) {
+      console.error(`Translation error for chunk with context "${chunk.context}":`, error)
       throw error
     }
   }
