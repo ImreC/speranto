@@ -1,5 +1,5 @@
 import { join } from 'path'
-import { LLMInterface, OllamaProvider, OpenAIProvider } from './interface'
+import { LLMInterface, OllamaProvider, OpenAIProvider, MistralProvider } from './interface'
 import type { TranslatableChunk } from './parser'
 
 interface TranslatorOptions {
@@ -7,7 +7,7 @@ interface TranslatorOptions {
   temperature: number
   sourceLang: string
   targetLang: string
-  provider?: 'ollama' | 'openai'
+  provider?: 'ollama' | 'openai' | 'mistral'
   apiKey?: string
 }
 
@@ -25,11 +25,15 @@ export class Translator {
   }
 
   private createLLMProvider(): LLMInterface {
+    console.log(this.options)
     const provider = this.options.provider || 'ollama'
+    console.log(`Using ${provider} provider`)
 
     switch (provider) {
       case 'openai':
         return new OpenAIProvider(this.options.model, this.options.apiKey)
+      case 'mistral':
+        return new MistralProvider(this.options.model, this.options.apiKey)
       case 'ollama':
       default:
         return new OllamaProvider(this.options.model)

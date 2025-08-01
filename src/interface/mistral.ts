@@ -1,43 +1,34 @@
-import OpenAI from 'openai'
+import { Mistral } from '@mistralai/mistralai'
 import { LLMInterface, type LLMGenerateOptions, type LLMResponse } from './llm.interface'
 
-export class OpenAIProvider extends LLMInterface {
-  private client: OpenAI
+export class MistralProvider extends LLMInterface {
+  private client: Mistral
 
   constructor(model: string, apiKey?: string) {
     super(model)
-    this.client = new OpenAI({
-      apiKey: apiKey || process.env.OPENAI_API_KEY,
+    this.client = new Mistral({
+      apiKey: apiKey || process.env.MISTRAL_API_KEY,
     })
   }
 
   async generate(prompt: string, options?: LLMGenerateOptions): Promise<LLMResponse> {
     await this.ensureModelReady()
 
-    const completion = await this.client.chat.completions.create({
+    const completion = await this.client.chat.complete({
       model: this.model,
       messages: [{ role: 'user', content: prompt }],
       temperature: options?.temperature ?? 0.7,
-      max_tokens: options?.maxTokens,
-      top_p: options?.topP,
       ...options,
     })
     console.log('Completion:', completion)
 
     const choice = completion.choices[0]
+
     console.log(choice)
     if (choice) {
       return {
-        content: choice.message.content || '',
+        content: (choice.message.content as string) || '',
         model: completion.model,
-        finishReason: choice.finish_reason || undefined,
-        usage: completion.usage
-          ? {
-              promptTokens: completion.usage.prompt_tokens,
-              completionTokens: completion.usage.completion_tokens,
-              totalTokens: completion.usage.total_tokens,
-            }
-          : undefined,
       }
     }
     return {
@@ -49,24 +40,15 @@ export class OpenAIProvider extends LLMInterface {
   async isModelAvailable(): Promise<boolean> {
     try {
       const models = await this.client.models.list()
-      return models.data.some((m) => m.id === this.model)
+      const modelNames = models?.data?.map((m) => m.name)
+      return modelNames?.some((m) => m === this.model) || false
     } catch (error) {
-      if (error instanceof OpenAI.AuthenticationError) {
-        console.error('OpenAI API key is invalid or missing')
-        return false
-      }
-      console.error('Error checking OpenAI models:', error)
+      console.error('Error checking Mistral models:', error)
       return false
     }
   }
 
   async ensureModelReady(): Promise<void> {
-    if (!this.client.apiKey) {
-      throw new Error(
-        'OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass it to the constructor.',
-      )
-    }
-
     const isAvailable = await this.isModelAvailable()
     if (!isAvailable) {
       console.warn(

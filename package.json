@@ -19,6 +19,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@mistralai/mistralai": "^1.7.5",
     "@types/glob": "^9.0.0",
     "@types/mdast": "^4.0.4",
     "commander": "^14.0.0",

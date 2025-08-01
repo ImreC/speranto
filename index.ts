@@ -23,6 +23,7 @@ program
           ', ',
         )} usng model ${config.model}`,
       )
+      console.log(config)
 
       await translate(config)
     } catch (error) {

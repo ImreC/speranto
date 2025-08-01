@@ -28,6 +28,7 @@ export async function translate(config: Config) {
       temperature: config.temperature,
       sourceLang: config.sourceLang,
       targetLang: targetLang,
+      provider: config.provider,
     })
 
     for (const file of files) {
