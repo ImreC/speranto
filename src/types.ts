@@ -6,4 +6,5 @@ export interface Config {
   sourceDir: string
   targetDir: string
   provider?: 'openai' | 'ollama' | 'mistral'
+  useLangCodeAsFilename?: boolean
 }

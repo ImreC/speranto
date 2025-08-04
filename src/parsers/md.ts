@@ -1,8 +1,7 @@
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import remarkStringify from 'remark-stringify'
-import { visit } from 'unist-util-visit'
-import type { Root, Content, Heading, Paragraph, List, BlockContent } from 'mdast'
+import type { Root, Heading, BlockContent } from 'mdast'
 
 export const parser = unified().use(remarkParse).use(remarkStringify)
 
@@ -17,7 +16,7 @@ export async function stringifyMarkdown(tree: Root): Promise<string> {
 }
 
 export interface TranslatableChunk {
-  nodes: Content[]
+  nodes: BlockContent[]
   startIndex: number
   endIndex: number
   context?: string // e.g., "section", "list-with-context"
@@ -26,7 +25,7 @@ export interface TranslatableChunk {
 
 export async function getTranslatableChunks(tree: Root): Promise<TranslatableChunk[]> {
   const chunks: TranslatableChunk[] = []
-  let currentChunk: Content[] = []
+  let currentChunk: BlockContent[] = []
   let chunkStartIndex = 0
 
   // Helper to finalize current chunk
@@ -35,17 +34,17 @@ export async function getTranslatableChunks(tree: Root): Promise<TranslatableChu
       // Create a temporary root with just the chunk nodes
       const chunkRoot: Root = {
         type: 'root',
-        children: [...currentChunk] as BlockContent[]
+        children: [...currentChunk] as BlockContent[],
       }
       // Convert to markdown string
       const text = await stringifyMarkdown(chunkRoot)
-      
+
       chunks.push({
         nodes: [...currentChunk],
         startIndex: chunkStartIndex,
         endIndex,
         context,
-        text: text.trim()
+        text: text.trim(),
       })
       currentChunk = []
     }
@@ -138,7 +137,7 @@ export async function getTranslatableChunks(tree: Root): Promise<TranslatableChu
       // Create markdown for code block
       const codeRoot: Root = {
         type: 'root',
-        children: [node as BlockContent]
+        children: [node as BlockContent],
       }
       const codeText = await stringifyMarkdown(codeRoot)
       chunks.push({
@@ -146,13 +145,13 @@ export async function getTranslatableChunks(tree: Root): Promise<TranslatableChu
         startIndex: index,
         endIndex: index,
         context: 'code',
-        text: codeText.trim()
+        text: codeText.trim(),
       })
       chunkStartIndex = index + 1
     }
     // Regular content nodes
     else if (node) {
-      currentChunk.push(node)
+      currentChunk.push(node as BlockContent)
 
       // Check if we should create a chunk based on size
       // Estimate: 3-5 paragraphs or similar nodes make a good chunk

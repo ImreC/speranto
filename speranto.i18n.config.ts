@@ -6,4 +6,5 @@ export default {
   sourceDir: './example_content/i18n',
   targetDir: './example_content/i18n',
   provider: 'mistral',
+  useLangCodeAsFilename: true,
 }

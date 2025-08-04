@@ -34,14 +34,20 @@ export async function reconstructJSON(
   original: TranslatableJSON,
   translations: Array<{ path: string[]; value: string }>,
 ): Promise<TranslatableJSON> {
-  const result = JSON.parse(JSON.stringify(original))
+  const result = JSON.parse(JSON.stringify(original)) as TranslatableJSON
 
   for (const { path, value } of translations) {
-    let current: any = result
+    let current: TranslatableJSON = result
     for (let i = 0; i < path.length - 1; i++) {
-      current = current[path[i]]
+      const key = path[i]
+      if (key !== undefined && typeof current[key] === 'object' && current[key] !== null) {
+        current = current[key] as TranslatableJSON
+      }
     }
-    current[path[path.length - 1]] = value
+    const lastKey = path[path.length - 1]
+    if (lastKey !== undefined) {
+      current[lastKey] = value
+    }
   }
 
   return result

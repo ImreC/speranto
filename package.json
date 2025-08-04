@@ -12,6 +12,8 @@
     "build": "bun build src/cli.ts --outdir dist --target bun"
   },
   "devDependencies": {
+    "@types/babel__generator": "^7.27.0",
+    "@types/babel__traverse": "^7.28.0",
     "@types/bun": "latest",
     "@vitest/ui": "^3.2.4"
   },

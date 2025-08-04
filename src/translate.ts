@@ -1,6 +1,6 @@
 import { glob } from 'glob'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { join, dirname, relative, extname } from 'path'
+import { join, dirname, relative, extname, basename } from 'path'
 import {
   getTranslatableChunks,
   parseMarkdown,
@@ -113,7 +113,20 @@ async function translateMarkdownFile(
 
     // Generate output path
     const relativePath = relative(config.sourceDir, filePath)
-    const targetPath = join(config.targetDir.replace('[lang]', targetLang), relativePath)
+    let targetPath: string
+    if (config.useLangCodeAsFilename) {
+      // Use language code as filename
+      const ext = extname(filePath)
+      const dirPath = dirname(relativePath)
+      targetPath = join(
+        config.targetDir.replace('[lang]', targetLang),
+        dirPath,
+        `${targetLang}${ext}`,
+      )
+    } else {
+      // Keep original filename structure
+      targetPath = join(config.targetDir.replace('[lang]', targetLang), relativePath)
+    }
     console.log(`Saving result in targetPath: ${targetPath}`)
 
     // Ensure target directory exists
@@ -161,7 +174,19 @@ async function translateJSONFile(
 
     // Generate output path
     const relativePath = relative(config.sourceDir, filePath)
-    const targetPath = join(config.targetDir.replace('[lang]', targetLang), relativePath)
+    let targetPath: string
+    if (config.useLangCodeAsFilename) {
+      const ext = extname(filePath)
+      const dirPath = dirname(relativePath)
+      targetPath = join(
+        config.targetDir.replace('[lang]', targetLang),
+        dirPath,
+        `${targetLang}${ext}`,
+      )
+    } else {
+      // Keep original filename structure
+      targetPath = join(config.targetDir.replace('[lang]', targetLang), relativePath)
+    }
     console.log(`Saving result in targetPath: ${targetPath}`)
 
     // Ensure target directory exists
@@ -207,7 +232,19 @@ async function translateJSFile(
 
     // Generate output path
     const relativePath = relative(config.sourceDir, filePath)
-    const targetPath = join(config.targetDir.replace('[lang]', targetLang), relativePath)
+    let targetPath: string
+    if (config.useLangCodeAsFilename) {
+      const ext = extname(filePath)
+      const dirPath = dirname(relativePath)
+      targetPath = join(
+        config.targetDir.replace('[lang]', targetLang),
+        dirPath,
+        `${targetLang}${ext}`,
+      )
+    } else {
+      // Keep original filename structure
+      targetPath = join(config.targetDir.replace('[lang]', targetLang), relativePath)
+    }
     console.log(`Saving result in targetPath: ${targetPath}`)
 
     // Ensure target directory exists

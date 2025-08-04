@@ -1,6 +1,6 @@
 import { parse } from '@babel/parser'
-const generate = require('@babel/generator').default
-const traverse = require('@babel/traverse').default
+import generate from '@babel/generator'
+import traverse from '@babel/traverse'
 import * as t from '@babel/types'
 
 export interface TranslatableJSString {
@@ -12,7 +12,10 @@ export interface TranslatableJSString {
   }
 }
 
-export async function parseJS(content: string, isTypeScript: boolean = false): Promise<any> {
+export async function parseJS(
+  content: string,
+  isTypeScript: boolean = false,
+): Promise<t.File> {
   return parse(content, {
     sourceType: 'module',
     plugins: isTypeScript ? ['typescript'] : [],
@@ -20,13 +23,13 @@ export async function parseJS(content: string, isTypeScript: boolean = false): P
 }
 
 export async function extractTranslatableStringsJS(
-  ast: any
+  ast: t.File,
 ): Promise<TranslatableJSString[]> {
   const results: TranslatableJSString[] = []
   let nodeCounter = 0
 
   traverse(ast, {
-    StringLiteral(path) {
+    StringLiteral(path: any) {
       // Check if the string is in an object property value position
       if (
         path.parent.type === 'ObjectProperty' &&
@@ -40,17 +43,14 @@ export async function extractTranslatableStringsJS(
         })
       }
     },
-    TemplateLiteral(path) {
+    TemplateLiteral(path: any) {
       // Skip template literals with expressions (like ${SITE_TITLE})
       if (path.node.expressions.length > 0) {
         return
       }
-      
+
       // Check if it's in an object property value position
-      if (
-        path.parent.type === 'ObjectProperty' &&
-        path.parent.value === path.node
-      ) {
+      if (path.parent.type === 'ObjectProperty' && path.parent.value === path.node) {
         const value = path.node.quasis[0].value.raw
         results.push({
           path: `template_${nodeCounter++}`,
@@ -64,27 +64,20 @@ export async function extractTranslatableStringsJS(
   return results
 }
 
-function isVariableReference(path: any): boolean {
-  // Skip any value that references a variable or constant
-  // This includes imported constants like SITE_TITLE
+function isVariableReference(_path: any): boolean {
   return false
 }
 
-function containsVariableReferences(node: any): boolean {
-  // Check if template literal contains ${} expressions
-  return node.expressions && node.expressions.length > 0
-}
-
 export async function reconstructJS(
-  ast: any,
-  translations: Array<{ path: string; value: string }>
+  ast: t.File,
+  translations: Array<{ path: string; value: string }>,
 ): Promise<string> {
   let stringCounter = 0
   let templateCounter = 0
-  const translationMap = new Map(translations.map(t => [t.path, t.value]))
+  const translationMap = new Map(translations.map((t) => [t.path, t.value]))
 
   traverse(ast, {
-    StringLiteral(path) {
+    StringLiteral(path: any) {
       if (
         path.parent.type === 'ObjectProperty' &&
         path.parent.value === path.node &&
@@ -96,16 +89,13 @@ export async function reconstructJS(
         }
       }
     },
-    TemplateLiteral(path) {
+    TemplateLiteral(path: any) {
       // Skip template literals with expressions
       if (path.node.expressions.length > 0) {
         return
       }
-      
-      if (
-        path.parent.type === 'ObjectProperty' &&
-        path.parent.value === path.node
-      ) {
+
+      if (path.parent.type === 'ObjectProperty' && path.parent.value === path.node) {
         const key = `template_${templateCounter++}`
         if (translationMap.has(key)) {
           path.node.quasis[0].value.raw = translationMap.get(key)!

@@ -105,3 +105,9 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.md`.
+
+
+## Important general instructions:
+
+- Only write comments if there is really no other way. Prefer good code splitting and clear function names
+
