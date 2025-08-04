@@ -3,7 +3,7 @@ export default {
   temperature: 0.0,
   sourceLang: 'en',
   targetLangs: ['nl'],
-  sourceDir: './example_content/content/blog/en',
-  targetDir: './example_content/content/blog/[lang]',
+  sourceDir: './example_content/i18n',
+  targetDir: './example_content/i18n',
   provider: 'mistral',
 }

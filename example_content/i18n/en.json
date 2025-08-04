@@ -1,0 +1,12 @@
+{
+  "siteTitle": "Titel",
+  "siteDescription": "Beschrijving",
+  "nav": {
+    "home": "Thuis",
+    "blog": "Blog",
+    "about": "Over",
+    "career": "Carrière",
+    "openMenu": "Open hoofdnavigatie",
+    "closeMenu": "Sluit hoofdnavigatie"
+  }
+}

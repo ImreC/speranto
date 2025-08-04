@@ -5,5 +5,5 @@ export interface Config {
   targetLangs: string[]
   sourceDir: string
   targetDir: string
-  provider?: 'openai' | 'ollama'
+  provider?: 'openai' | 'ollama' | 'mistral'
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseMarkdown, getTranslatableChunks } from '../src/parser'
+import { parseMarkdown, getTranslatableChunks } from '../src/parsers/md'
 
 describe('parser', () => {
   it('should create chunks from markdown', async () => {

@@ -1,6 +1,6 @@
 import { join } from 'path'
 import { LLMInterface, OllamaProvider, OpenAIProvider, MistralProvider } from './interface'
-import type { TranslatableChunk } from './parser'
+import type { TranslatableChunk } from './parsers/md'
 
 interface TranslatorOptions {
   model: string
