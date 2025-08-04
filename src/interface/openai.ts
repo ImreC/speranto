@@ -22,7 +22,6 @@ export class OpenAIProvider extends LLMInterface {
       top_p: options?.topP,
       ...options,
     })
-    console.log('Completion:', completion)
 
     const choice = completion.choices[0]
     console.log(choice)

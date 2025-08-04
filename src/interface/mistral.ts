@@ -20,7 +20,6 @@ export class MistralProvider extends LLMInterface {
       temperature: options?.temperature ?? 0.7,
       ...options,
     })
-    console.log('Completion:', completion)
 
     const choice = completion.choices[0]
 

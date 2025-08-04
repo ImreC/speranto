@@ -58,6 +58,35 @@ export async function translate(config: Config) {
   console.log('Translation complete!')
 }
 
+async function writeOutput(
+  config: Config,
+  filePath: string,
+  translatedContent: string,
+  targetLang: string,
+) {
+  const relativePath = relative(config.sourceDir, filePath)
+  let targetPath: string
+  if (config.useLangCodeAsFilename) {
+    const ext = extname(filePath)
+    const dirPath = dirname(relativePath)
+    targetPath = join(
+      config.targetDir.replace('[lang]', targetLang),
+      dirPath,
+      `${targetLang}${ext}`,
+    )
+  } else {
+    targetPath = join(config.targetDir.replace('[lang]', targetLang), relativePath)
+  }
+  console.log(`Saving result in targetPath: ${targetPath}`)
+
+  await mkdir(dirname(targetPath), { recursive: true })
+
+  translatedContent += `\n\nTranslated automatically with ${config.model}. The original content was written in ${config.sourceLang}. Please allow for minor errors.`
+  await writeFile(targetPath, translatedContent, 'utf-8')
+
+  return relativePath
+}
+
 async function translateMarkdownFile(
   filePath: string,
   config: Config,
@@ -75,10 +104,8 @@ async function translateMarkdownFile(
 
     console.log(`Created ${chunks.length} chunks`)
 
-    // Create a deep copy of the tree for translation
     const translatedTree: Root = JSON.parse(JSON.stringify(tree))
 
-    // Translate chunks
     const translatedChunks: TranslatableChunk[] = []
 
     for (const chunk of chunks) {
@@ -89,12 +116,8 @@ async function translateMarkdownFile(
       })
     }
 
-    // Reconstruct the tree with translated content
     for (const translatedChunk of translatedChunks) {
-      // Parse the translated text back to nodes
       const translatedNodes = await parseMarkdown(translatedChunk.text)
-
-      // Replace the nodes in the translated tree
       let nodeIndex = 0
       for (
         let i = translatedChunk.startIndex;
@@ -108,35 +131,9 @@ async function translateMarkdownFile(
       }
     }
 
-    // Stringify the translated tree
     let translatedContent = await stringifyMarkdown(translatedTree)
 
-    // Generate output path
-    const relativePath = relative(config.sourceDir, filePath)
-    let targetPath: string
-    if (config.useLangCodeAsFilename) {
-      // Use language code as filename
-      const ext = extname(filePath)
-      const dirPath = dirname(relativePath)
-      targetPath = join(
-        config.targetDir.replace('[lang]', targetLang),
-        dirPath,
-        `${targetLang}${ext}`,
-      )
-    } else {
-      // Keep original filename structure
-      targetPath = join(config.targetDir.replace('[lang]', targetLang), relativePath)
-    }
-    console.log(`Saving result in targetPath: ${targetPath}`)
-
-    // Ensure target directory exists
-    await mkdir(dirname(targetPath), { recursive: true })
-
-    translatedContent += `\n\nTranslated automatically with ${config.model}. The original content was written in ${config.sourceLang}. Please allow for minor errors.`
-
-    // Write the translated markdown
-    await writeFile(targetPath, translatedContent, 'utf-8')
-
+    const relativePath = await writeOutput(config, filePath, translatedContent, targetLang)
     console.log(`Translated ${relativePath} -> ${targetLang}`)
   } catch (error) {
     console.error(`Error translating ${filePath}:`, error)
@@ -168,33 +165,10 @@ async function translateJSONFile(
       translatedStrings.push({ path, value: translatedText })
     }
 
-    // Reconstruct JSON with translations
     const translatedJSON = await reconstructJSON(jsonData, translatedStrings)
     const translatedContent = await stringifyJSON(translatedJSON)
 
-    // Generate output path
-    const relativePath = relative(config.sourceDir, filePath)
-    let targetPath: string
-    if (config.useLangCodeAsFilename) {
-      const ext = extname(filePath)
-      const dirPath = dirname(relativePath)
-      targetPath = join(
-        config.targetDir.replace('[lang]', targetLang),
-        dirPath,
-        `${targetLang}${ext}`,
-      )
-    } else {
-      // Keep original filename structure
-      targetPath = join(config.targetDir.replace('[lang]', targetLang), relativePath)
-    }
-    console.log(`Saving result in targetPath: ${targetPath}`)
-
-    // Ensure target directory exists
-    await mkdir(dirname(targetPath), { recursive: true })
-
-    // Write the translated JSON
-    await writeFile(targetPath, translatedContent, 'utf-8')
-
+    const relativePath = await writeOutput(config, filePath, translatedContent, targetLang)
     console.log(`Translated ${relativePath} -> ${targetLang}`)
   } catch (error) {
     console.error(`Error translating ${filePath}:`, error)
@@ -209,17 +183,14 @@ async function translateJSFile(
   isTypeScript: boolean,
 ) {
   try {
-    // Read source file
     console.log(`Reading JS/TS file ${filePath}`)
     const content = await readFile(filePath, 'utf-8')
 
-    // Parse JS/TS
     const ast = await parseJS(content, isTypeScript)
     const strings = await extractTranslatableStringsJS(ast)
 
     console.log(`Found ${strings.length} strings to translate`)
 
-    // Translate each string
     const translatedStrings: Array<{ path: string; value: string }> = []
 
     for (const { path, value } of strings) {
@@ -227,31 +198,9 @@ async function translateJSFile(
       translatedStrings.push({ path, value: translatedText })
     }
 
-    // Reconstruct JS/TS with translations
     const translatedContent = await reconstructJS(ast, translatedStrings)
 
-    // Generate output path
-    const relativePath = relative(config.sourceDir, filePath)
-    let targetPath: string
-    if (config.useLangCodeAsFilename) {
-      const ext = extname(filePath)
-      const dirPath = dirname(relativePath)
-      targetPath = join(
-        config.targetDir.replace('[lang]', targetLang),
-        dirPath,
-        `${targetLang}${ext}`,
-      )
-    } else {
-      // Keep original filename structure
-      targetPath = join(config.targetDir.replace('[lang]', targetLang), relativePath)
-    }
-    console.log(`Saving result in targetPath: ${targetPath}`)
-
-    // Ensure target directory exists
-    await mkdir(dirname(targetPath), { recursive: true })
-
-    // Write the translated JS/TS
-    await writeFile(targetPath, translatedContent, 'utf-8')
+    const relativePath = await writeOutput(config, filePath, translatedContent, targetLang)
 
     console.log(`Translated ${relativePath} -> ${targetLang}`)
   } catch (error) {
