@@ -8,16 +8,8 @@ const program = new Command()
 
 const loadConfig = async (configPath: string) => {
   try {
-    const configModule = await import(configPath)
+    const configModule = await import(resolve(process.cwd(), configPath))
     const config: Config = configModule.default
-
-    console.log(
-      `Starting translation from ${config.sourceLang} to ${config.targetLangs.join(
-        ', ',
-      )} usng model ${config.model}`,
-    )
-    console.log(config)
-
     return config
   } catch (error) {
     console.error('Error loading config:', error)
@@ -79,7 +71,6 @@ program
         'File naming strategy:',
         config.useLangCodeAsFilename ? 'use language codes' : 'keep original names',
       )
-      console.log(config)
 
       await translate(config)
     } catch (error) {

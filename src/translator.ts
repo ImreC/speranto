@@ -25,7 +25,6 @@ export class Translator {
   }
 
   private createLLMProvider(): LLMInterface {
-    console.log(this.options)
     const provider = this.options.provider || 'ollama'
     console.log(`Using ${provider} provider`)
 

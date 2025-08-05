@@ -5,11 +5,10 @@
   "module": "index.ts",
   "type": "module",
   "bin": {
-    "speranto": "./src/cli.ts"
+    "speranto": "./index.ts"
   },
   "scripts": {
-    "dev": "bun run src/cli.ts",
-    "build": "bun build src/cli.ts --outdir dist --target bun"
+    "build": "bun build index.ts --outdir dist --target node"
   },
   "devDependencies": {
     "@types/babel__generator": "^7.27.0",
@@ -30,6 +29,7 @@
     "@types/mdast": "^4.0.4",
     "commander": "^14.0.0",
     "glob": "^11.0.3",
+    "listr2": "^9.0.1",
     "ollama": "^0.5.16",
     "openai": "^5.11.0",
     "remark": "^15.0.1",

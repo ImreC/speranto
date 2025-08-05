@@ -24,7 +24,6 @@ export class OpenAIProvider extends LLMInterface {
     })
 
     const choice = completion.choices[0]
-    console.log(choice)
     if (choice) {
       return {
         content: choice.message.content || '',
@@ -75,8 +74,6 @@ export class OpenAIProvider extends LLMInterface {
   }
 
   async isModelLoaded(): Promise<boolean> {
-    // OpenAI models are cloud-based and don't require local download
-    // We just check if the model is available
     const isAvailable = await this.isModelAvailable()
 
     return isAvailable
