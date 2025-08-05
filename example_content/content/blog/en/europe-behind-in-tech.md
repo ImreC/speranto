@@ -6,6 +6,7 @@ heroImage: '../../../src/images/blog/europe-behind-in-tech.jpg'
 featured: true
 lang: en
 ---
+
 Let's be honest: when you think of cutting-edge technology, your mind probably jumps across the Atlantic to Silicon Valley, or perhaps increasingly, to Asia. For too long, Europe has seemed to be lagging behind, particularly when it comes to the digital realm. We're massively dependent on tech solutions from elsewhere, and it's a trend that needs to be addressed.
 
 As someone who has built numerous software systems, I've seen it firsthand. My work, like that of countless others, relies almost entirely on American big tech servers – AWS, Azure, and Google Cloud. I've never once been asked to deploy an application on a European provider like Hetzner or Scaleway. This dependency extends to our everyday tools too: Microsoft Office, Google Workspace, Slack, Dropbox, Notion – they're all American SaaS products. This means a constant flow of our data to our counterparts across the pond. And when it comes to physical production, we're miles behind China, which has become the world's fabrication hub.

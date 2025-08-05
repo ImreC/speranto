@@ -170,6 +170,5 @@ export async function getTranslatableChunks(tree: Root): Promise<TranslatableChu
   if (currentChunk.length > 0) {
     await finalizeChunk(tree.children.length - 1, 'text')
   }
-
   return chunks
 }

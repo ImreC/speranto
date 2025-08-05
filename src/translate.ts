@@ -81,7 +81,6 @@ async function writeOutput(
 
   await mkdir(dirname(targetPath), { recursive: true })
 
-  translatedContent += `\n\nTranslated automatically with ${config.model}. The original content was written in ${config.sourceLang}. Please allow for minor errors.`
   await writeFile(targetPath, translatedContent, 'utf-8')
 
   return relativePath
@@ -106,15 +105,15 @@ async function translateMarkdownFile(
 
     const translatedTree: Root = JSON.parse(JSON.stringify(tree))
 
-    const translatedChunks: TranslatableChunk[] = []
-
-    for (const chunk of chunks) {
-      const translatedText = await translator.translateChunk(chunk)
-      translatedChunks.push({
-        ...chunk,
-        text: translatedText,
-      })
-    }
+    const translatedChunks = await Promise.all(
+      chunks.map(async (chunk) => {
+        const translatedText = await translator.translateChunk(chunk)
+        return {
+          ...chunk,
+          text: translatedText,
+        }
+      }),
+    )
 
     for (const translatedChunk of translatedChunks) {
       const translatedNodes = await parseMarkdown(translatedChunk.text)
@@ -132,6 +131,7 @@ async function translateMarkdownFile(
     }
 
     let translatedContent = await stringifyMarkdown(translatedTree)
+    translatedContent += `\n\n_Translated automatically with ${config.model}. The original content was written in ${config.sourceLang}. Please allow for minor errors._`
 
     const relativePath = await writeOutput(config, filePath, translatedContent, targetLang)
     console.log(`Translated ${relativePath} -> ${targetLang}`)
@@ -147,23 +147,20 @@ async function translateJSONFile(
   translator: Translator,
 ) {
   try {
-    // Read source file
     console.log(`Reading JSON file ${filePath}`)
     const content = await readFile(filePath, 'utf-8')
 
-    // Parse JSON
     const jsonData = await parseJSON(content)
     const strings = await extractTranslatableStrings(jsonData)
 
     console.log(`Found ${strings.length} strings to translate`)
 
-    // Translate each string
-    const translatedStrings: Array<{ path: string[]; value: string }> = []
-
-    for (const { path, value } of strings) {
-      const translatedText = await translator.translateText(value)
-      translatedStrings.push({ path, value: translatedText })
-    }
+    const translatedStrings = await Promise.all(
+      strings.map(async ({ path, value }) => {
+        const translatedText = await translator.translateText(value)
+        return { path, value: translatedText }
+      }),
+    )
 
     const translatedJSON = await reconstructJSON(jsonData, translatedStrings)
     const translatedContent = await stringifyJSON(translatedJSON)
@@ -191,12 +188,12 @@ async function translateJSFile(
 
     console.log(`Found ${strings.length} strings to translate`)
 
-    const translatedStrings: Array<{ path: string; value: string }> = []
-
-    for (const { path, value } of strings) {
-      const translatedText = await translator.translateText(value)
-      translatedStrings.push({ path, value: translatedText })
-    }
+    const translatedStrings = await Promise.all(
+      strings.map(async ({ path, value }) => {
+        const translatedText = await translator.translateText(value)
+        return { path, value: translatedText }
+      }),
+    )
 
     const translatedContent = await reconstructJS(ast, translatedStrings)
 

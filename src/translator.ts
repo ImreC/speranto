@@ -61,6 +61,29 @@ export class Translator {
     }
   }
 
+  private constructPrompt(text: string, context: string | undefined = undefined) {
+    let prompt =
+      'You are a professional translator who is going to be asked to translate a text. '
+
+    if (this.languageInstructions) {
+      prompt += `\n\You are following these language-specific guidelines:\n${this.languageInstructions}`
+    }
+    // Add context-specific instructions
+    if (context === 'code') {
+      prompt += `\n\The text is a code block. Only translate comments and documentation strings, not the code itself.`
+    } else if (context === 'list-with-context') {
+      prompt += `\n\The text is a list with surrounding context. Maintain the list structure and ensure the translation flows naturally with the context.`
+    } else if (context === 'section') {
+      prompt += `\n\The text is a complete section. Ensure consistency in terminology throughout the section.`
+    }
+
+    prompt += `\n\nYou maintain the original structure and formatting exactly. You respond with the translation and the translation only. If the format is markdown pay special attention to keeping the structure of the frontmatter. Also, do not respond with something similar to "Here's the translation: ". Just respond with the translation.`
+
+    prompt += `\n\nTranslate the following text from ${this.options.sourceLang} to ${this.options.targetLang}:\n\n${text}`
+
+    return prompt
+  }
+
   async translateText(text: string): Promise<string> {
     if (!text.trim()) return text
     console.log('Awaiting model to be ready')
@@ -68,15 +91,7 @@ export class Translator {
     console.log('Model ready. Starting translation')
 
     try {
-      let prompt = `Translate: "${text}" from ${this.options.sourceLang} to ${this.options.targetLang}.`
-
-      if (this.languageInstructions) {
-        prompt += `\n\nFollow these language-specific guidelines:\n${this.languageInstructions}`
-      }
-
-      prompt += `\n\nRespond with only the translation.`
-
-      const response = await this.llm.generate(prompt, {
+      const response = await this.llm.generate(this.constructPrompt(text), {
         temperature: this.options.temperature,
       })
       console.log(`Translated to ${this.options.targetLang}`)
@@ -93,28 +108,12 @@ export class Translator {
     await this.isModelReady
 
     try {
-      let prompt = `Translate the following ${chunk.context || 'text'} from ${
-        this.options.sourceLang
-      } to ${this.options.targetLang}:\n\n${chunk.text}`
-
-      if (this.languageInstructions) {
-        prompt += `\n\nFollow these language-specific guidelines:\n${this.languageInstructions}`
-      }
-
-      // Add context-specific instructions
-      if (chunk.context === 'code') {
-        prompt += `\n\nThis is a code block. Only translate comments and documentation strings, not the code itself.`
-      } else if (chunk.context === 'list-with-context') {
-        prompt += `\n\nThis is a list with surrounding context. Maintain the list structure and ensure the translation flows naturally with the context.`
-      } else if (chunk.context === 'section') {
-        prompt += `\n\nThis is a complete section. Ensure consistency in terminology throughout the section.`
-      }
-
-      prompt += `\n\nProvide only the translated content, maintaining the exact same markdown formatting and structure.`
-
-      const response = await this.llm.generate(prompt, {
-        temperature: this.options.temperature,
-      })
+      const response = await this.llm.generate(
+        this.constructPrompt(chunk.text, chunk.context),
+        {
+          temperature: this.options.temperature,
+        },
+      )
 
       return response.content
     } catch (error) {
