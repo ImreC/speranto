@@ -1,6 +1,6 @@
 {
   "name": "speranto",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "A quick and simple machine translation tool for i18n in webapps",
   "module": "index.ts",
   "type": "module",

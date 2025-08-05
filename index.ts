@@ -27,7 +27,7 @@ const loadConfig = async (configPath: string) => {
 program
   .name('speranto')
   .description('A quick and simple machine translation tool for i18n in webapps')
-  .version('1.0.0')
+  .version('0.0.1')
   .option('-c, --config <path>', 'Path to config file', './speranto.config.ts')
   .option('-m, --model <model>', 'Model to use for translation', 'gpt-4o-mini')
   .option('-t, --temperature <number>', 'Temperature for translation', parseFloat, 0.0)
