@@ -23,12 +23,24 @@ export class MockLLMProvider extends LLMInterface {
     console.log('PROMPT', prompt)
 
     // Extract the text to translate from the prompt
-    const match = prompt.match(/Translate: "(.*)" from/)
-    const textToTranslate = match ? (match[1] as string) : ''
+    // Try multiple patterns to match different prompt formats
+    let textToTranslate = ''
+    
+    // Pattern 1: Translate: "text" from
+    let match = prompt.match(/Translate: "(.*)" from/)
+    if (match) {
+      textToTranslate = match[1] as string
+    } else {
+      // Pattern 2: Translate the following ... from X to Y:\n\n<content>
+      match = prompt.match(/Translate the following .* from \w+ to \w+:\n\n([\s\S]+?)(?:\n\nThis is a complete|$)/)
+      if (match) {
+        textToTranslate = match[1] as string
+      }
+    }
 
     // Return a mock translation
     const mockTranslation =
-      this.mockResponses.get(textToTranslate) || `[Translated: ${textToTranslate}]`
+      this.mockResponses.get(textToTranslate.trim()) || `[Translated: ${textToTranslate}]`
 
     return {
       content: mockTranslation,

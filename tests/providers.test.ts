@@ -136,7 +136,7 @@ test('Translator should include language instructions in prompt', async () => {
   expect(capturedPrompt).toContain('Use informal tone for Spanish translations')
 })
 
-test.only('Translator should handle chunk translation with context', async () => {
+test('Translator should handle chunk translation with context', async () => {
   const mockProvider = new MockLLMProvider('test-model')
   mockProvider.setMockResponse('# Title', '# Título')
 
@@ -161,5 +161,5 @@ test.only('Translator should handle chunk translation with context', async () =>
   }
 
   const result = await translator.translateChunk(chunk)
-  expect(result).toContain('Título')
+  expect(result).toContain('# Título')
 })
