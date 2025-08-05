@@ -6,8 +6,14 @@ export class OpenAIProvider extends LLMInterface {
 
   constructor(model: string, apiKey?: string) {
     super(model)
+    const key = apiKey || process.env.LLM_API_KEY
+    if (!key) {
+      throw new Error(
+        'OpenAI API key is required. Set LLM_API_KEY environment variable or pass it to the constructor.',
+      )
+    }
     this.client = new OpenAI({
-      apiKey: apiKey || process.env.OPENAI_API_KEY,
+      apiKey: key,
     })
   }
 

@@ -6,8 +6,15 @@ export class MistralProvider extends LLMInterface {
 
   constructor(model: string, apiKey?: string) {
     super(model)
+    const key = apiKey || process.env.LLM_API_KEY
+    console.log(key)
+    if (!key) {
+      throw new Error(
+        'Mistral API key is required. Set LLM_API_KEY environment variable or pass it to the constructor.',
+      )
+    }
     this.client = new Mistral({
-      apiKey: apiKey || process.env.MISTRAL_API_KEY,
+      apiKey: key,
     })
   }
 

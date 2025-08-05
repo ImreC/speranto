@@ -5,6 +5,7 @@ export interface Config {
   targetLangs: string[]
   sourceDir: string
   targetDir: string
-  provider?: 'openai' | 'ollama' | 'mistral'
+  provider: 'openai' | 'ollama' | 'mistral'
   useLangCodeAsFilename?: boolean
+  apiKey?: string
 }

@@ -20,7 +20,7 @@ export interface LLMResponse {
 export abstract class LLMInterface {
   protected model: string
 
-  constructor(model: string) {
+  constructor(model: string, apiKey?: string) {
     this.model = model
   }
 

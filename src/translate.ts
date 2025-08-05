@@ -1,12 +1,7 @@
 import { glob } from 'glob'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { join, dirname, relative, extname, basename } from 'path'
-import {
-  getTranslatableChunks,
-  parseMarkdown,
-  stringifyMarkdown,
-  type TranslatableChunk,
-} from './parsers/md'
+import { join, dirname, relative, extname } from 'path'
+import { getTranslatableChunks, parseMarkdown, stringifyMarkdown } from './parsers/md'
 import {
   parseJSON,
   stringifyJSON,
@@ -41,6 +36,7 @@ export async function translate(config: Config) {
       sourceLang: config.sourceLang,
       targetLang: targetLang,
       provider: config.provider,
+      apiKey: config.apiKey,
     })
 
     for (const file of files) {

@@ -3,24 +3,15 @@ import { Command } from 'commander'
 import { resolve } from 'path'
 import { translate } from './src/translate'
 import type { Config } from './src/types'
+import { loadConfig } from './src/util/config'
 
 const program = new Command()
 
-const loadConfig = async (configPath: string) => {
-  try {
-    const configModule = await import(resolve(process.cwd(), configPath))
-    const config: Config = configModule.default
-    return config
-  } catch (error) {
-    console.error('Error loading config:', error)
-    process.exit(1)
-  }
-}
 program
   .name('speranto')
   .description('A quick and simple machine translation tool for i18n in webapps')
   .version('0.0.1')
-  .option('-c, --config <path>', 'Path to config file', './speranto.config.ts')
+  .option('-c, --config <path>', 'Path to config file')
   .option('-m, --model <model>', 'Model to use for translation', 'gpt-4o-mini')
   .option('-t, --temperature <number>', 'Temperature for translation', parseFloat, 0.0)
   .option('-s, --source-lang <lang>', 'Source language code', 'en')
@@ -42,11 +33,9 @@ program
     'Use language code as filename instead of keeping original names',
     false,
   )
+  .option('-k, --api-key <key>', 'API key for LLM provider')
   .action(async (options) => {
-    let passedConfig = {}
-    if (options.config) {
-      passedConfig = await loadConfig(options.config)
-    }
+    const passedConfig = await loadConfig(options.config)
     try {
       const config: Config = Object.assign(
         {
@@ -58,6 +47,7 @@ program
           targetDir: resolve(process.cwd(), options.targetDir),
           provider: options.provider as 'openai' | 'ollama' | 'mistral',
           useLangCodeAsFilename: options.useLangCodeAsFilename,
+          apiKey: options.apiKey,
         },
         passedConfig,
       )

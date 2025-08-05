@@ -1,14 +1,38 @@
 {
-  "name": "speranto",
-  "version": "0.0.1",
+  "name": "@speranto/speranto",
+  "version": "0.0.2",
+  "license": "MIT",
+  "author": "Imre Gelens",
+  "homepage": "https://github.com/imrec/speranto",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/imrec/speranto.git"
+  },
   "description": "A quick and simple machine translation tool for i18n in webapps",
-  "module": "index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "module": "dist/index.js",
   "type": "module",
   "bin": {
-    "speranto": "./index.ts"
+    "speranto": "./dist/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/types.d.ts"
+    }
   },
   "scripts": {
-    "build": "bun build index.ts --outdir dist --target node"
+    "types": "tsc src/types.ts --declaration --emitDeclarationOnly --outDir dist",
+    "build": "bun build index.ts --outdir dist --target node",
+    "publish": "bun run types && bun run build && bun publish",
+    "test": "LLM_API_KEY=test bun test"
   },
   "devDependencies": {
     "@types/babel__generator": "^7.27.0",
