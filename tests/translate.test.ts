@@ -45,14 +45,6 @@ test('translate should handle JSON files with single target language', async () 
     useLangCodeAsFilename: false,
   }
 
-  // Mock the translator to return predictable translations
-  const originalTranslator = await import('../src/translator')
-  const mockTranslate = async (text: string) => {
-    if (text.includes('Hello')) return 'Hola'
-    if (text.includes('Goodbye')) return 'Adiós'
-    return text
-  }
-
   // Run translation
   try {
     await translate(config)
