@@ -1,9 +1,13 @@
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import remarkStringify from 'remark-stringify'
+import remarkFrontmatter from 'remark-frontmatter'
 import type { Root, Heading, BlockContent } from 'mdast'
 
-export const parser = unified().use(remarkParse).use(remarkStringify)
+export const parser = unified()
+  .use(remarkParse)
+  .use(remarkFrontmatter, ['yaml'])
+  .use(remarkStringify)
 
 export async function parseMarkdown(content: string): Promise<Root> {
   const tree = parser.parse(content)
@@ -19,7 +23,7 @@ export interface TranslatableChunk {
   nodes: BlockContent[]
   startIndex: number
   endIndex: number
-  context?: string // e.g., "section", "list-with-context"
+  context?: string // e.g., "section", "list-with-context", "frontmatter"
   text: string // Markdown string representation of the chunk
 }
 
@@ -52,6 +56,31 @@ export async function getTranslatableChunks(tree: Root): Promise<TranslatableChu
 
   // Track which nodes have been processed
   const processedIndices = new Set<number>()
+
+  // Check for frontmatter at the beginning
+  if (
+    tree.children.length > 0 &&
+    tree.children[0] &&
+    (tree.children[0] as any).type === 'yaml'
+  ) {
+    const frontmatterNode = tree.children[0]
+    const frontmatterRoot: Root = {
+      type: 'root',
+      children: [frontmatterNode as BlockContent],
+    }
+    const frontmatterText = await stringifyMarkdown(frontmatterRoot)
+
+    chunks.push({
+      nodes: [frontmatterNode as BlockContent],
+      startIndex: 0,
+      endIndex: 0,
+      context: 'frontmatter',
+      text: frontmatterText.trim(),
+    })
+
+    processedIndices.add(0)
+    chunkStartIndex = 1
+  }
 
   // Process nodes with context-aware grouping
   for (let index = 0; index < tree.children.length; index++) {

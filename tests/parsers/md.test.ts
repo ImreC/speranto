@@ -135,3 +135,49 @@ Content for title two.`
   expect(firstChunk).toBeDefined()
   expect(secondChunk).toBeDefined()
 })
+
+test('getTranslatableChunks should handle frontmatter as a separate chunk', async () => {
+  const content = `---
+title: "Is Europe behind in tech? It's time for a mindset shift"
+description: 'Europe seems to be lagging behind in tech, but it doesn't have to be this way.'
+pubDate: '2025-07-23'
+heroImage: '../../../src/images/blog/europe-behind-in-tech.jpg'
+featured: true
+lang: en
+---
+
+# Main Content
+
+This is the main content after frontmatter.
+
+## Section One
+
+Some content in section one.`
+
+  const tree = await parseMarkdown(content)
+  const chunks = await getTranslatableChunks(tree)
+
+  // Check that we have at least 2 chunks (frontmatter + content)
+  expect(chunks.length).toBeGreaterThanOrEqual(2)
+
+  // Check that the first chunk is frontmatter
+  const frontmatterChunk = chunks[0]
+  expect(frontmatterChunk?.context).toBe('frontmatter')
+  expect(frontmatterChunk?.startIndex).toBe(0)
+  expect(frontmatterChunk?.endIndex).toBe(0)
+  expect(frontmatterChunk?.text).toContain('---')
+  expect(frontmatterChunk?.text).toContain('title: "Is Europe behind in tech?')
+  expect(frontmatterChunk?.text).toContain('lang: en')
+
+  // Check that subsequent chunks don't include frontmatter
+  const contentChunks = chunks.slice(1)
+  for (const chunk of contentChunks) {
+    expect(chunk.text).not.toContain('pubDate:')
+    expect(chunk.text).not.toContain('heroImage:')
+  }
+
+  // Verify the content is still properly chunked
+  const mainContentChunk = chunks.find((c) => c.text.includes('Main Content'))
+  expect(mainContentChunk).toBeDefined()
+  expect(mainContentChunk?.context).toBe('section')
+})

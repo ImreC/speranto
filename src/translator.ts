@@ -77,7 +77,7 @@ export class Translator {
       prompt += `\n\The text is a complete section. Ensure consistency in terminology throughout the section.`
     }
 
-    prompt += `\n\nYou maintain the original structure and formatting exactly. You respond with the translation and the translation only. If the format is markdown pay special attention to keeping the structure of the frontmatter. Also, do not respond with something similar to "Here's the translation: ". Just respond with the translation.`
+    prompt += `\n\nYou maintain the original structure and formatting exactly. You respond with the translation and the translation only.`
 
     prompt += `\n\nTranslate the following text from ${this.options.sourceLang} to ${this.options.targetLang}:\n\n${text}`
 
