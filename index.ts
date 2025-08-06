@@ -4,15 +4,19 @@ import { resolve } from 'path'
 import { translate } from './src/translate'
 import type { Config } from './src/types'
 import { loadConfig } from './src/util/config'
+import pkg from './package.json' assert { type: 'json' }
 
 const program = new Command()
 
 program
   .name('speranto')
   .description('A quick and simple machine translation tool for i18n in webapps')
-  .version('0.0.1')
-  .option('-c, --config <path>', 'Path to config file')
-  .option('-m, --model <model>', 'Model to use for translation', 'gpt-4o-mini')
+  .version(pkg.version)
+  .option(
+    '-c, --config <path>',
+    'Path to config file. Looks for speranto.config.ts or speranto.config.js in the current working directory if not specified',
+  )
+  .option('-m, --model <model>', 'Model to use for translation', 'mistral-large-latest')
   .option('-t, --temperature <number>', 'Temperature for translation', parseFloat, 0.0)
   .option('-s, --source-lang <lang>', 'Source language code', 'en')
   .option(
@@ -21,13 +25,17 @@ program
     (value) => value.split(','),
     ['es'],
   )
-  .option('-i, --source-dir <dir>', 'Source directory path', './content')
+  .option(
+    '-i, --source-dir <dir>',
+    'Source directory path. Will take all .json, .js, .ts and .md files in the root level of the folder.',
+    './content',
+  )
   .option(
     '-o, --target-dir <dir>',
     'Target directory path (use [lang] as placeholder)',
     './content/[lang]',
   )
-  .option('-p, --provider <provider>', 'LLM provider (openai, ollama, mistral)', 'openai')
+  .option('-p, --provider <provider>', 'LLM provider (openai, ollama, mistral)', 'mistral')
   .option(
     '--use-lang-code-as-filename',
     'Use language code as filename instead of keeping original names',

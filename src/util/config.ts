@@ -12,14 +12,14 @@ const getPath = (path?: string) => {
   })
 
   if (!defaultPath) {
-    console.error('No config file found')
-    process.exit(1)
+    return undefined
   }
   return defaultPath
 }
 
 export const loadConfig = async (configPath?: string) => {
   const path = getPath(configPath)
+  if (!path) return {}
   try {
     const configModule = await import(resolve(process.cwd(), path))
     const config = configModule.default

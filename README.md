@@ -49,6 +49,7 @@ export default config
 ```
 
 ```javascript
+// speranto.config.js
 const config = {
   model: 'mistral-large-latest',
   temperature: 0.0,
