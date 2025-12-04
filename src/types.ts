@@ -9,3 +9,26 @@ export interface Config {
   useLangCodeAsFilename?: boolean
   apiKey?: string
 }
+
+export interface TableConfig {
+  name: string
+  columns: string[]
+  idColumn?: string
+}
+
+export interface DatabaseConfig {
+  type: 'sqlite' | 'postgres' | 'mysql'
+  connection: string
+  tables: TableConfig[]
+  translationTableSuffix?: string
+}
+
+export interface DatabaseTranslationConfig {
+  model: string
+  temperature: number
+  sourceLang: string
+  targetLangs: string[]
+  provider: 'openai' | 'ollama' | 'mistral'
+  apiKey?: string
+  database: DatabaseConfig
+}

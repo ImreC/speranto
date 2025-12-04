@@ -2,7 +2,8 @@
 import { Command } from 'commander'
 import { resolve } from 'path'
 import { translate } from './src/translate'
-import type { Config } from './src/types'
+import { translateDatabase } from './src/translate-database'
+import type { Config, DatabaseTranslationConfig } from './src/types'
 import { loadConfig } from './src/util/config'
 import pkg from './package.json' assert { type: 'json' }
 
@@ -73,6 +74,55 @@ program
       await translate(config)
     } catch (error) {
       console.error('Error during translation:', error)
+      process.exit(1)
+    }
+  })
+
+program
+  .command('db')
+  .description('Translate content in database tables')
+  .requiredOption('-c, --config <path>', 'Path to database config file')
+  .option('-m, --model <model>', 'Model to use for translation')
+  .option('-t, --temperature <number>', 'Temperature for translation', parseFloat)
+  .option('-s, --source-lang <lang>', 'Source language code')
+  .option(
+    '-l, --target-langs <langs>',
+    'Target language codes (comma-separated)',
+    (value) => value.split(','),
+  )
+  .option('-p, --provider <provider>', 'LLM provider (openai, ollama, mistral)')
+  .option('-k, --api-key <key>', 'API key for LLM provider')
+  .action(async (options) => {
+    const passedConfig = await loadConfig(options.config)
+
+    if (!passedConfig.database) {
+      console.error('Error: Database configuration is required. Please specify database config.')
+      process.exit(1)
+    }
+
+    try {
+      const config: DatabaseTranslationConfig = {
+        model: options.model || passedConfig.model || 'mistral-large-latest',
+        temperature: options.temperature ?? passedConfig.temperature ?? 0.0,
+        sourceLang: options.sourceLang || passedConfig.sourceLang || 'en',
+        targetLangs: options.targetLangs || passedConfig.targetLangs || ['es'],
+        provider: (options.provider || passedConfig.provider || 'mistral') as
+          | 'openai'
+          | 'ollama'
+          | 'mistral',
+        apiKey: options.apiKey || passedConfig.apiKey,
+        database: passedConfig.database,
+      }
+
+      console.log(
+        `Starting database translation from ${config.sourceLang} to ${config.targetLangs.join(', ')} using model ${config.model}`,
+      )
+      console.log(`Database: ${config.database.type} - ${config.database.connection}`)
+      console.log(`Tables: ${config.database.tables.map((t) => t.name).join(', ')}`)
+
+      await translateDatabase(config)
+    } catch (error) {
+      console.error('Error during database translation:', error)
       process.exit(1)
     }
   })

@@ -9,6 +9,7 @@ interface TranslatorOptions {
   targetLang: string
   provider?: 'ollama' | 'openai' | 'mistral'
   apiKey?: string
+  llm?: LLMInterface
 }
 
 export class Translator {
