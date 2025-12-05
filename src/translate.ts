@@ -37,6 +37,7 @@ export async function translate(config: Config) {
       targetLang: targetLang,
       provider: config.provider,
       apiKey: config.apiKey,
+      llm: config.llm,
     })
 
     for (const file of files) {

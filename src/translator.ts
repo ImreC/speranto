@@ -20,7 +20,7 @@ export class Translator {
 
   constructor(options: TranslatorOptions) {
     this.options = options
-    this.llm = this.createLLMProvider()
+    this.llm = options.llm ?? this.createLLMProvider()
     this.isModelReady = this.llm.isModelLoaded()
     this.loadLanguageInstructions()
   }

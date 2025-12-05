@@ -1,3 +1,5 @@
+import type { LLMInterface } from './interface'
+
 export interface Config {
   model: string
   temperature: number
@@ -8,6 +10,7 @@ export interface Config {
   provider: 'openai' | 'ollama' | 'mistral'
   useLangCodeAsFilename?: boolean
   apiKey?: string
+  llm?: LLMInterface
 }
 
 export interface TableConfig {

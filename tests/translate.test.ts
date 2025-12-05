@@ -4,6 +4,7 @@ import { mkdir, writeFile, rm, readFile } from 'node:fs/promises'
 import { join } from 'path'
 import type { Config } from '../src/types'
 import { mockBunFile } from './mocks/BunFile'
+import { MockLLMProvider } from './mocks/LLMProvider'
 
 // Create test directories
 const testDir = join(process.cwd(), 'test-fixtures')
@@ -27,6 +28,10 @@ afterEach(async () => {
 })
 
 test('translate should handle JSON files with single target language', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  mockProvider.setMockResponse('Hello', 'Hola')
+  mockProvider.setMockResponse('Goodbye', 'Adiós')
+
   // Create test JSON file
   const jsonContent = {
     greeting: 'Hello',
@@ -43,28 +48,23 @@ test('translate should handle JSON files with single target language', async () 
     targetDir: join(targetDir, '[lang]'),
     provider: 'mistral',
     useLangCodeAsFilename: false,
+    llm: mockProvider,
   }
 
-  // Run translation
-  try {
-    await translate(config)
+  await translate(config)
 
-    // Check if output file was created
-    const outputPath = join(targetDir, 'es', 'test.json')
-    const outputContent = await readFile(outputPath, 'utf-8')
-    const output = JSON.parse(outputContent)
+  // Check if output file was created
+  const outputPath = join(targetDir, 'es', 'test.json')
+  const outputContent = await readFile(outputPath, 'utf-8')
+  const output = JSON.parse(outputContent)
 
-    // Note: Since we can't easily mock the internal translator,
-    // we're checking that the file structure is preserved
-    expect(output).toHaveProperty('greeting')
-    expect(output).toHaveProperty('farewell')
-  } catch (error) {
-    // Expected since we're not mocking the actual LLM calls
-    expect(error).toBeDefined()
-  }
+  expect(output).toHaveProperty('greeting')
+  expect(output).toHaveProperty('farewell')
 })
 
 test('translate should handle multiple target languages', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+
   // Create test markdown file
   await writeFile(join(sourceDir, 'test.md'), '# Hello World\n\nWelcome to our app.')
 
@@ -76,17 +76,17 @@ test('translate should handle multiple target languages', async () => {
     sourceDir,
     targetDir: join(targetDir, '[lang]'),
     provider: 'mistral',
+    llm: mockProvider,
   }
 
-  try {
-    await translate(config)
-  } catch (error) {
-    // Expected - checking that it attempts to create multiple language folders
-    expect(config.targetLangs).toHaveLength(3)
-  }
+  await translate(config)
+
+  expect(config.targetLangs).toHaveLength(3)
 })
 
 test('translate should use language code as filename when configured', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+
   await writeFile(join(sourceDir, 'about.json'), '{"title": "About Us"}')
 
   const config: Config = {
@@ -98,17 +98,17 @@ test('translate should use language code as filename when configured', async () 
     targetDir,
     provider: 'mistral',
     useLangCodeAsFilename: true,
+    llm: mockProvider,
   }
 
-  try {
-    await translate(config)
-  } catch (error) {
-    // The config should be set correctly
-    expect(config.useLangCodeAsFilename).toBe(true)
-  }
+  await translate(config)
+
+  expect(config.useLangCodeAsFilename).toBe(true)
 })
 
 test('translate should handle JavaScript files', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+
   const jsContent = `
 const config = {
   title: "My App",
@@ -125,17 +125,19 @@ const config = {
     sourceDir,
     targetDir: join(targetDir, '[lang]'),
     provider: 'mistral',
+    llm: mockProvider,
   }
 
-  try {
-    await translate(config)
-  } catch (error) {
-    // Expected
-    expect(error).toBeDefined()
-  }
+  await translate(config)
+
+  const outputPath = join(targetDir, 'fr', 'config.js')
+  const outputContent = await readFile(outputPath, 'utf-8')
+  expect(outputContent).toContain('config')
 })
 
 test('translate should handle TypeScript files', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+
   const tsContent = `
 interface Config {
   title: string;
@@ -155,17 +157,19 @@ const config: Config = {
     sourceDir,
     targetDir: join(targetDir, '[lang]'),
     provider: 'mistral',
+    llm: mockProvider,
   }
 
-  try {
-    await translate(config)
-  } catch (error) {
-    // Expected
-    expect(error).toBeDefined()
-  }
+  await translate(config)
+
+  const outputPath = join(targetDir, 'de', 'config.ts')
+  const outputContent = await readFile(outputPath, 'utf-8')
+  expect(outputContent).toContain('Config')
 })
 
 test('translate should find files in nested directories', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+
   // Create nested structure
   await mkdir(join(sourceDir, 'docs', 'api'), { recursive: true })
   await writeFile(join(sourceDir, 'docs', 'api', 'reference.md'), '# API Reference')
@@ -179,12 +183,17 @@ test('translate should find files in nested directories', async () => {
     sourceDir,
     targetDir: join(targetDir, '[lang]'),
     provider: 'mistral',
+    llm: mockProvider,
   }
 
-  try {
-    await translate(config)
-  } catch (error) {
-    // Expected - just verifying the glob patterns work
-    expect(error).toBeDefined()
-  }
+  await translate(config)
+
+  // Verify nested files were translated
+  const apiOutputPath = join(targetDir, 'es', 'docs', 'api', 'reference.md')
+  const guideOutputPath = join(targetDir, 'es', 'docs', 'guide.md')
+  const apiContent = await readFile(apiOutputPath, 'utf-8')
+  const guideContent = await readFile(guideOutputPath, 'utf-8')
+
+  expect(apiContent).toBeDefined()
+  expect(guideContent).toBeDefined()
 })

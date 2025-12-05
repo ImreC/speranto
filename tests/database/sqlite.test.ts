@@ -21,8 +21,12 @@ beforeEach(async () => {
       slug TEXT
     )
   `)
-  db.run(`INSERT INTO articles (title, body, slug) VALUES ('Hello World', 'This is the body.', 'hello-world')`)
-  db.run(`INSERT INTO articles (title, body, slug) VALUES ('Second Post', 'Another body here.', 'second-post')`)
+  db.run(
+    `INSERT INTO articles (title, body, slug) VALUES ('Hello World', 'This is the body.', 'hello-world')`,
+  )
+  db.run(
+    `INSERT INTO articles (title, body, slug) VALUES ('Second Post', 'Another body here.', 'second-post')`,
+  )
   db.close()
 
   adapter = new SQLiteAdapter(TEST_DB)
@@ -43,18 +47,22 @@ test('getSourceRows returns all rows with specified columns', async () => {
   })
 
   expect(rows).toHaveLength(2)
-  expect(rows[0].id).toBe(1)
-  expect(rows[0].columns.title).toBe('Hello World')
-  expect(rows[0].columns.body).toBe('This is the body.')
-  expect(rows[1].id).toBe(2)
-  expect(rows[1].columns.title).toBe('Second Post')
+  expect(rows[0]?.id).toBe(1)
+  expect(rows[0]?.columns.title).toBe('Hello World')
+  expect(rows[0]?.columns.body).toBe('This is the body.')
+  expect(rows[1]?.id).toBe(2)
+  expect(rows[1]?.columns.title).toBe('Second Post')
 })
 
 test('ensureTranslationTable creates translation table', async () => {
   await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
 
   const db = new Database(TEST_DB)
-  const tables = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='articles_translations'").all()
+  const tables = db
+    .query(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='articles_translations'",
+    )
+    .all()
   db.close()
 
   expect(tables).toHaveLength(1)

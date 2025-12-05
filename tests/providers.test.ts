@@ -13,17 +13,13 @@ test('Translator should work with mocked LLM provider', async () => {
   const mockProvider = new MockLLMProvider('test-model')
   mockProvider.setMockResponse('Hello World', 'Hola Mundo')
 
-  // @ts-ignore - Inject mock provider
   const translator = new Translator({
     model: 'test-model',
     temperature: 0.7,
     sourceLang: 'en',
     targetLang: 'es',
-    provider: 'mistral',
+    llm: mockProvider,
   })
-
-  // @ts-ignore - Replace the llm with our mock
-  translator.llm = mockProvider
 
   const result = await translator.translateText('Hello World')
   expect(result).toBe('Hola Mundo')
@@ -32,17 +28,13 @@ test('Translator should work with mocked LLM provider', async () => {
 test('Translator should handle empty text', async () => {
   const mockProvider = new MockLLMProvider('test-model')
 
-  // @ts-ignore
   const translator = new Translator({
     model: 'test-model',
     temperature: 0.7,
     sourceLang: 'en',
     targetLang: 'fr',
-    provider: 'mistral',
+    llm: mockProvider,
   })
-
-  // @ts-ignore
-  translator.llm = mockProvider
 
   const result = await translator.translateText('  ')
   expect(result).toBe('  ')
@@ -51,17 +43,13 @@ test('Translator should handle empty text', async () => {
 test('Translator should handle LLM errors gracefully', async () => {
   const mockProvider = new MockLLMProvider('test-model', true)
 
-  // @ts-ignore
   const translator = new Translator({
     model: 'test-model',
     temperature: 0.7,
     sourceLang: 'en',
     targetLang: 'de',
-    provider: 'mistral',
+    llm: mockProvider,
   })
-
-  // @ts-ignore
-  translator.llm = mockProvider
 
   expect(async () => {
     await translator.translateText('Hello')
@@ -70,31 +58,16 @@ test('Translator should handle LLM errors gracefully', async () => {
 
 test('Translator should wait for model to be loaded', async () => {
   const mockProvider = new MockLLMProvider('test-model')
-  mockProvider.setModelLoaded(false)
 
-  // @ts-ignore
   const translator = new Translator({
     model: 'test-model',
     temperature: 0.7,
     sourceLang: 'en',
     targetLang: 'it',
-    provider: 'mistral',
+    llm: mockProvider,
   })
 
-  // @ts-ignore
-  translator.llm = mockProvider
-
-  // Start translation
-  const translationPromise = translator.translateText('Test')
-
-  // Model not loaded yet
-  await new Promise((resolve) => setTimeout(resolve, 10))
-
-  // Now set model as loaded
-  mockProvider.setModelLoaded(true)
-
-  // Translation should complete
-  const result = await translationPromise
+  const result = await translator.translateText('Test')
   expect(result).toContain('[Translated: Test]')
 })
 
@@ -125,11 +98,11 @@ test('Translator should include language instructions in prompt', async () => {
     temperature: 0.5,
     sourceLang: 'en',
     targetLang: 'es',
-    provider: 'mistral',
+    llm: mockProvider,
   })
 
-  // @ts-ignore
-  translator.llm = mockProvider
+  // Wait for async language instructions to load
+  await new Promise((resolve) => setTimeout(resolve, 10))
 
   await translator.translateText('Hello')
 
@@ -140,17 +113,13 @@ test('Translator should handle chunk translation with context', async () => {
   const mockProvider = new MockLLMProvider('test-model')
   mockProvider.setMockResponse('# Title', '# Título')
 
-  // @ts-ignore
   const translator = new Translator({
     model: 'test-model',
     temperature: 0.7,
     sourceLang: 'en',
     targetLang: 'es',
-    provider: 'mistral',
+    llm: mockProvider,
   })
-
-  // @ts-ignore
-  translator.llm = mockProvider
 
   const chunk = {
     text: '# Title',
