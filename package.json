@@ -1,6 +1,6 @@
 {
   "name": "@speranto/speranto",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "license": "MIT",
   "author": "Imre Gelens",
   "homepage": "https://github.com/imrec/speranto",
@@ -31,7 +31,7 @@
   "scripts": {
     "types": "tsc src/types.ts --declaration --emitDeclarationOnly --outDir dist",
     "build": "bun build index.ts --outdir dist --target node",
-    "publish": "bun run types && bun run build && bun publish",
+    "publish": "bun run build && bun publish && bunx jsr publish",
     "test": "LLM_API_KEY=test bun test"
   },
   "devDependencies": {

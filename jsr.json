@@ -1,9 +1,8 @@
 {
   "name": "@speranto/speranto",
-  "version": "0.0.3",
+  "version": "0.0.5",
   "license": "MIT",
   "exports": {
-    ".": "./dist/index.js",
-    "./types": "./dist/index.d.ts"
+    ".": "./dist/index.js"
   }
 }

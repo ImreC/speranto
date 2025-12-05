@@ -124,3 +124,107 @@ Specify custom source and target directories:
 ```bash
 speranto --source-dir ./docs --target-dir ./locales/[lang]/docs
 ```
+
+## Database Translation
+
+Speranto can also translate content stored in database tables. This is useful for CMS systems or applications that store translatable content in a database.
+
+### Database Command
+
+```bash
+speranto db --config ./speranto.db.config.ts
+```
+
+### Database Configuration
+
+Create a configuration file with database settings:
+
+```typescript
+// speranto.db.config.ts
+import type { DatabaseTranslationConfig } from '@speranto/speranto'
+
+const config: DatabaseTranslationConfig = {
+  model: 'gpt-4o-mini',
+  temperature: 0.0,
+  sourceLang: 'en',
+  targetLangs: ['es', 'fr', 'de'],
+  provider: 'openai',
+  apiKey: process.env.OPENAI_API_KEY,
+  database: {
+    type: 'postgres',  // 'sqlite' or 'postgres'
+    connection: 'postgresql://user:password@localhost:5432/mydb',
+    tables: [
+      {
+        name: 'articles',
+        columns: ['title', 'body', 'summary'],
+        idColumn: 'id'  // optional, defaults to 'id'
+      },
+      {
+        name: 'products',
+        columns: ['name', 'description']
+      }
+    ],
+    translationTableSuffix: '_translations'  // optional, defaults to '_translations'
+  }
+}
+
+export default config
+```
+
+### SQLite Example
+
+```typescript
+const config = {
+  // ... other options
+  database: {
+    type: 'sqlite',
+    connection: './data/content.db',
+    tables: [
+      {
+        name: 'posts',
+        columns: ['title', 'content']
+      }
+    ]
+  }
+}
+```
+
+### Database Configuration Options
+
+- `database.type`: Database type (`'sqlite'` or `'postgres'`)
+- `database.connection`: Connection string
+  - SQLite: path to the database file (e.g., `'./data.db'`)
+  - PostgreSQL: connection URL (e.g., `'postgresql://user:pass@host:5432/db'`)
+- `database.tables`: Array of tables to translate
+  - `name`: Table name
+  - `columns`: Array of column names to translate
+  - `idColumn`: Primary key column (optional, defaults to `'id'`)
+- `database.translationTableSuffix`: Suffix for translation tables (optional, defaults to `'_translations'`)
+
+### How It Works
+
+For each source table, Speranto creates a translation table (e.g., `articles_translations`) with the following structure:
+
+| Column | Description |
+|--------|-------------|
+| `id` | Auto-incrementing primary key |
+| `source_id` | Reference to the source row |
+| `lang` | Target language code |
+| `<column>` | Translated content for each specified column |
+| `created_at` | Timestamp of creation |
+| `updated_at` | Timestamp of last update |
+
+Translations are upserted, so running the command multiple times will update existing translations rather than creating duplicates.
+
+### Database CLI Options
+
+```bash
+speranto db \
+  --config <path>              # Path to config file (required)
+  --model <model>              # Override model from config
+  --temperature <number>       # Override temperature
+  --source-lang <lang>         # Override source language
+  --target-langs <langs>       # Override target languages (comma-separated)
+  --provider <provider>        # Override LLM provider
+  --api-key <key>              # Override API key
+```
