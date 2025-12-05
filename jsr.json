@@ -4,5 +4,8 @@
   "license": "MIT",
   "exports": {
     ".": "./dist/index.js"
+  },
+  "publish": {
+    "exclude": ["!dist"]
   }
 }
