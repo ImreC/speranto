@@ -1,12 +1,24 @@
-import { test, expect, beforeEach } from 'bun:test'
+import { test, expect, beforeAll, afterAll } from 'bun:test'
+import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { join } from 'path'
 import { Translator } from '../src/translator'
 import { type LLMResponse, type LLMGenerateOptions } from '../src/interface'
 import { MockLLMProvider } from './mocks/LLMProvider'
-import { mockBunFile } from './mocks/BunFile'
 
-beforeEach(() => {
-  // @ts-ignore
-  globalThis.Bun.file = mockBunFile
+const instructionsDir = join(process.cwd(), 'instructions')
+const esInstructionsFile = join(instructionsDir, 'es.md')
+
+beforeAll(() => {
+  if (!existsSync(instructionsDir)) {
+    mkdirSync(instructionsDir, { recursive: true })
+  }
+  writeFileSync(esInstructionsFile, 'Use informal tone for Spanish translations.')
+})
+
+afterAll(() => {
+  if (existsSync(esInstructionsFile)) {
+    rmSync(esInstructionsFile)
+  }
 })
 
 test('Translator should work with mocked LLM provider', async () => {
@@ -84,13 +96,6 @@ test('Translator should include language instructions in prompt', async () => {
     }
   }
 
-  // Mock language instructions file
-  // @ts-ignore
-  globalThis.Bun.file = (path: string) => ({
-    exists: async () => path.includes('es.md'),
-    text: async () => 'Use informal tone for Spanish translations.',
-  })
-
   const mockProvider = new CapturingMockProvider('test-model')
 
   const translator = new Translator({
@@ -101,8 +106,7 @@ test('Translator should include language instructions in prompt', async () => {
     llm: mockProvider,
   })
 
-  // Wait for async language instructions to load
-  await new Promise((resolve) => setTimeout(resolve, 10))
+  await new Promise((resolve) => setTimeout(resolve, 50))
 
   await translator.translateText('Hello')
 

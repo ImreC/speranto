@@ -1,4 +1,6 @@
 import { join } from 'path'
+import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { LLMInterface, OllamaProvider, OpenAIProvider, MistralProvider } from './interface'
 import type { TranslatableChunk } from './parsers/md'
 
@@ -47,9 +49,8 @@ export class Translator {
         'instructions',
         `${this.options.targetLang}.md`,
       )
-      const file = Bun.file(instructionsPath)
-      if (await file.exists()) {
-        this.languageInstructions = await file.text()
+      if (existsSync(instructionsPath)) {
+        this.languageInstructions = await readFile(instructionsPath, 'utf-8')
         console.log(`Loaded language instructions for ${this.options.targetLang}`)
       } else {
         console.log(`No specific instructions found for ${this.options.targetLang}`)

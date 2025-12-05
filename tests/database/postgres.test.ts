@@ -45,7 +45,7 @@ afterAll(async () => {
   await sql.close()
 })
 
-test('getSourceRows returns all rows with specified columns', async () => {
+test('pg - getSourceRows returns all rows with specified columns', async () => {
   const rows = await adapter.getSourceRows({
     name: 'articles',
     columns: ['title', 'body'],
@@ -59,7 +59,7 @@ test('getSourceRows returns all rows with specified columns', async () => {
   expect(rows[1]?.columns.title).toBe('Second Post')
 })
 
-test('ensureTranslationTable creates translation table', async () => {
+test('pg - ensureTranslationTable creates translation table', async () => {
   await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
 
   const tables = await sql.unsafe(`
@@ -70,7 +70,7 @@ test('ensureTranslationTable creates translation table', async () => {
   expect(tables).toHaveLength(1)
 })
 
-test('upsertTranslation inserts new translation', async () => {
+test('pg - upsertTranslation inserts new translation', async () => {
   await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
 
   await adapter.upsertTranslation(
@@ -89,7 +89,7 @@ test('upsertTranslation inserts new translation', async () => {
   expect(existing?.columns.body).toBe('Este es el cuerpo.')
 })
 
-test('upsertTranslation updates existing translation', async () => {
+test('pg - upsertTranslation updates existing translation', async () => {
   await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
 
   await adapter.upsertTranslation(
@@ -117,14 +117,14 @@ test('upsertTranslation updates existing translation', async () => {
   expect(existing?.columns.body).toBe('Cuerpo actualizado.')
 })
 
-test('getExistingTranslation returns null for non-existent translation', async () => {
+test('pg - getExistingTranslation returns null for non-existent translation', async () => {
   await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
 
   const existing = await adapter.getExistingTranslation('articles', 999, 'fr', '_translations')
   expect(existing).toBeNull()
 })
 
-test('getTranslationTableName returns correct name', () => {
+test('pg - getTranslationTableName returns correct name', () => {
   const name = adapter.getTranslationTableName('articles', '_translations')
   expect(name).toBe('articles_translations')
 })

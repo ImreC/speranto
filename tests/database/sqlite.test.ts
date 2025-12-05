@@ -40,7 +40,7 @@ afterEach(async () => {
   }
 })
 
-test('getSourceRows returns all rows with specified columns', async () => {
+test('sqlite - getSourceRows returns all rows with specified columns', async () => {
   const rows = await adapter.getSourceRows({
     name: 'articles',
     columns: ['title', 'body'],
@@ -54,7 +54,7 @@ test('getSourceRows returns all rows with specified columns', async () => {
   expect(rows[1]?.columns.title).toBe('Second Post')
 })
 
-test('ensureTranslationTable creates translation table', async () => {
+test('sqlite - ensureTranslationTable creates translation table', async () => {
   await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
 
   const db = new Database(TEST_DB)
@@ -68,7 +68,7 @@ test('ensureTranslationTable creates translation table', async () => {
   expect(tables).toHaveLength(1)
 })
 
-test('upsertTranslation inserts new translation', async () => {
+test('sqlite - upsertTranslation inserts new translation', async () => {
   await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
 
   await adapter.upsertTranslation(
@@ -87,7 +87,7 @@ test('upsertTranslation inserts new translation', async () => {
   expect(existing?.columns.body).toBe('Este es el cuerpo.')
 })
 
-test('upsertTranslation updates existing translation', async () => {
+test('sqlite - upsertTranslation updates existing translation', async () => {
   await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
 
   await adapter.upsertTranslation(
@@ -115,14 +115,14 @@ test('upsertTranslation updates existing translation', async () => {
   expect(existing?.columns.body).toBe('Cuerpo actualizado.')
 })
 
-test('getExistingTranslation returns null for non-existent translation', async () => {
+test('sqlite - getExistingTranslation returns null for non-existent translation', async () => {
   await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
 
   const existing = await adapter.getExistingTranslation('articles', 999, 'fr', '_translations')
   expect(existing).toBeNull()
 })
 
-test('getTranslationTableName returns correct name', () => {
+test('sqlite - getTranslationTableName returns correct name', () => {
   const name = adapter.getTranslationTableName('articles', '_translations')
   expect(name).toBe('articles_translations')
 })

@@ -1,9 +1,9 @@
-import { SQL } from 'bun'
+import pg from 'pg'
 import { DatabaseAdapter, type SourceRow, type TranslationRow } from './adapter'
 import type { TableConfig } from '../types'
 
 export class PostgresAdapter extends DatabaseAdapter {
-  private sql: SQL | null = null
+  private client: pg.Client | null = null
   private connectionString: string
 
   constructor(connectionString: string) {
@@ -12,12 +12,13 @@ export class PostgresAdapter extends DatabaseAdapter {
   }
 
   async connect(): Promise<void> {
-    this.sql = new SQL(this.connectionString)
+    this.client = new pg.Client({ connectionString: this.connectionString })
+    await this.client.connect()
   }
 
   async close(): Promise<void> {
-    await this.sql?.close()
-    this.sql = null
+    await this.client?.end()
+    this.client = null
   }
 
   getTranslationTableName(sourceTable: string, suffix: string): string {
@@ -30,13 +31,13 @@ export class PostgresAdapter extends DatabaseAdapter {
     _idColumn: string,
     suffix: string,
   ): Promise<void> {
-    if (!this.sql) throw new Error('Database not connected')
+    if (!this.client) throw new Error('Database not connected')
 
     const translationTable = this.getTranslationTableName(sourceTable, suffix)
 
     const columnDefs = columns.map((col) => `"${col}" TEXT`).join(', ')
 
-    await this.sql.unsafe(`
+    await this.client.query(`
       CREATE TABLE IF NOT EXISTS "${translationTable}" (
         id SERIAL PRIMARY KEY,
         source_id TEXT NOT NULL,
@@ -48,21 +49,22 @@ export class PostgresAdapter extends DatabaseAdapter {
       )
     `)
 
-    await this.sql.unsafe(`
+    await this.client.query(`
       CREATE INDEX IF NOT EXISTS "idx_${translationTable}_source_lang"
       ON "${translationTable}"(source_id, lang)
     `)
   }
 
   async getSourceRows(table: TableConfig): Promise<SourceRow[]> {
-    if (!this.sql) throw new Error('Database not connected')
+    if (!this.client) throw new Error('Database not connected')
 
     const idColumn = table.idColumn || 'id'
     const selectColumns = [idColumn, ...table.columns].map((c) => `"${c}"`).join(', ')
 
-    const rows = (await this.sql.unsafe(
+    const result = await this.client.query(
       `SELECT ${selectColumns} FROM "${table.name}"`,
-    )) as Record<string, unknown>[]
+    )
+    const rows = result.rows as Record<string, unknown>[]
 
     return rows.map((row) => ({
       id: row[idColumn] as string | number,
@@ -79,15 +81,16 @@ export class PostgresAdapter extends DatabaseAdapter {
     lang: string,
     suffix: string,
   ): Promise<TranslationRow | null> {
-    if (!this.sql) throw new Error('Database not connected')
+    if (!this.client) throw new Error('Database not connected')
 
     const translationTable = this.getTranslationTableName(sourceTable, suffix)
 
     try {
-      const rows = (await this.sql.unsafe(
+      const result = await this.client.query(
         `SELECT * FROM "${translationTable}" WHERE source_id = $1 AND lang = $2`,
         [String(sourceId), lang],
-      )) as Record<string, unknown>[]
+      )
+      const rows = result.rows as Record<string, unknown>[]
 
       const row = rows[0]
       if (!row) return null
@@ -114,7 +117,7 @@ export class PostgresAdapter extends DatabaseAdapter {
     translation: TranslationRow,
     suffix: string,
   ): Promise<void> {
-    if (!this.sql) throw new Error('Database not connected')
+    if (!this.client) throw new Error('Database not connected')
 
     const translationTable = this.getTranslationTableName(sourceTable, suffix)
     const columnNames = Object.keys(translation.columns)
@@ -128,7 +131,7 @@ export class PostgresAdapter extends DatabaseAdapter {
       ...columnNames.map((col) => translation.columns[col]),
     ]
 
-    await this.sql.unsafe(
+    await this.client.query(
       `
       INSERT INTO "${translationTable}" (source_id, lang, ${quotedColumns}, updated_at)
       VALUES ($1, $2, ${placeholders}, NOW())

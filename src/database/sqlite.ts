@@ -1,4 +1,5 @@
-import { Database } from 'bun:sqlite'
+import initSqlJs, { type Database } from 'sql.js'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { DatabaseAdapter, type SourceRow, type TranslationRow } from './adapter'
 import type { TableConfig } from '../types'
 
@@ -12,12 +13,28 @@ export class SQLiteAdapter extends DatabaseAdapter {
   }
 
   async connect(): Promise<void> {
-    this.db = new Database(this.connectionString)
+    const SQL = await initSqlJs()
+    if (existsSync(this.connectionString)) {
+      const buffer = readFileSync(this.connectionString)
+      this.db = new SQL.Database(buffer)
+    } else {
+      this.db = new SQL.Database()
+    }
+  }
+
+  private save(): void {
+    if (this.db) {
+      const data = this.db.export()
+      writeFileSync(this.connectionString, Buffer.from(data))
+    }
   }
 
   async close(): Promise<void> {
-    this.db?.close()
-    this.db = null
+    if (this.db) {
+      this.save()
+      this.db.close()
+      this.db = null
+    }
   }
 
   getTranslationTableName(sourceTable: string, suffix: string): string {
@@ -27,7 +44,7 @@ export class SQLiteAdapter extends DatabaseAdapter {
   async ensureTranslationTable(
     sourceTable: string,
     columns: string[],
-    idColumn: string,
+    _idColumn: string,
     suffix: string,
   ): Promise<void> {
     if (!this.db) throw new Error('Database not connected')
@@ -55,6 +72,7 @@ export class SQLiteAdapter extends DatabaseAdapter {
       ON ${translationTable}(source_id, lang)
     `
     this.db.run(indexSql)
+    this.save()
   }
 
   async getSourceRows(table: TableConfig): Promise<SourceRow[]> {
@@ -64,7 +82,12 @@ export class SQLiteAdapter extends DatabaseAdapter {
     const selectColumns = [idColumn, ...table.columns].join(', ')
 
     const sql = `SELECT ${selectColumns} FROM ${table.name}`
-    const rows = this.db.query(sql).all() as Record<string, unknown>[]
+    const stmt = this.db.prepare(sql)
+    const rows: Record<string, unknown>[] = []
+    while (stmt.step()) {
+      rows.push(stmt.getAsObject() as Record<string, unknown>)
+    }
+    stmt.free()
 
     return rows.map((row) => ({
       id: row[idColumn] as string | number,
@@ -91,8 +114,14 @@ export class SQLiteAdapter extends DatabaseAdapter {
     const sql = `SELECT * FROM ${translationTable} WHERE source_id = ? AND lang = ?`
 
     try {
-      const row = this.db.query(sql).get(String(sourceId), lang) as Record<string, unknown> | null
-      if (!row) return null
+      const stmt = this.db.prepare(sql)
+      stmt.bind([String(sourceId), lang])
+      if (!stmt.step()) {
+        stmt.free()
+        return null
+      }
+      const row = stmt.getAsObject() as Record<string, unknown>
+      stmt.free()
 
       const columns: Record<string, string> = {}
       for (const [key, value] of Object.entries(row)) {
@@ -138,5 +167,6 @@ export class SQLiteAdapter extends DatabaseAdapter {
     ]
 
     this.db.run(sql, values)
+    this.save()
   }
 }
