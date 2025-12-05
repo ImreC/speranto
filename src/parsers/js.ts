@@ -1,7 +1,17 @@
 import { parse } from '@babel/parser'
-import generate from '@babel/generator'
-import traverse from '@babel/traverse'
+import * as _generate from '@babel/generator'
+import * as _traverse from '@babel/traverse'
 import * as t from '@babel/types'
+
+function resolveDefault<T>(mod: any): T {
+  if (typeof mod === 'function') return mod
+  if (mod && typeof mod.default === 'function') return mod.default
+  if (mod && mod.default && typeof mod.default.default === 'function') return mod.default.default
+  return mod
+}
+
+const traverse = resolveDefault<typeof _traverse.default>(_traverse)
+const generate = resolveDefault<typeof _generate.default>(_generate)
 
 export interface TranslatableJSString {
   path: string

@@ -1,6 +1,6 @@
 import { glob } from 'glob'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { join, dirname, relative, extname } from 'path'
+import { join, dirname, relative, extname, basename } from 'path'
 import { getTranslatableChunks, parseMarkdown, stringifyMarkdown } from './parsers/md'
 import {
   parseJSON,
@@ -15,12 +15,23 @@ import type { Config } from './types'
 import type { Root, BlockContent } from 'mdast'
 
 export async function translate(config: Config) {
-  const patterns = [
-    join(config.sourceDir, '**/*.md'),
-    join(config.sourceDir, '**/*.json'),
-    join(config.sourceDir, '**/*.js'),
-    join(config.sourceDir, '**/*.ts'),
-  ]
+  let patterns: string[]
+
+  if (config.useLangCodeAsFilename) {
+    patterns = [
+      join(config.sourceDir, `**/${config.sourceLang}.md`),
+      join(config.sourceDir, `**/${config.sourceLang}.json`),
+      join(config.sourceDir, `**/${config.sourceLang}.js`),
+      join(config.sourceDir, `**/${config.sourceLang}.ts`),
+    ]
+  } else {
+    patterns = [
+      join(config.sourceDir, '**/*.md'),
+      join(config.sourceDir, '**/*.json'),
+      join(config.sourceDir, '**/*.js'),
+      join(config.sourceDir, '**/*.ts'),
+    ]
+  }
 
   const allFiles = await Promise.all(patterns.map((pattern) => glob(pattern)))
   const files = allFiles.flat()

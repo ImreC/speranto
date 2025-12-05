@@ -11,13 +11,16 @@ Default to using Bun instead of Node.js.
 
 ## APIs
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
+**Important:** This package is published to npm and jsr as a universal Node-compatible package. Use Node.js APIs (`node:fs`, `node:path`, etc.) in runtime code, not Bun-specific APIs like `Bun.file` or `Bun.write`.
+
+- `node:fs/promises` for file operations (readFile, writeFile, etc.)
+- `node:path` for path operations
 - `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
+
+Bun-specific APIs are fine for:
+- Build scripts
+- Test files
+- Development tooling
 
 ## Testing
 

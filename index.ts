@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 import { Command } from 'commander'
-import { resolve } from 'path'
+import { resolve } from 'node:path'
+import { writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { translate } from './src/translate'
 import { translateDatabase } from './src/translate-database'
 import type { Config, DatabaseTranslationConfig } from './src/types'
@@ -43,7 +45,45 @@ program
     false,
   )
   .option('-k, --api-key <key>', 'API key for LLM provider')
+  .option('--as-config', 'Write current options to config file and exit')
   .action(async (options) => {
+    if (options.asConfig) {
+      const configPath = options.config || 'speranto.config.ts'
+      if (existsSync(configPath)) {
+        console.warn(`Warning: ${configPath} already exists and will be overwritten.`)
+        const readline = await import('node:readline')
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+        const answer = await new Promise<string>((resolve) => {
+          rl.question('Continue? [y/N] ', resolve)
+        })
+        rl.close()
+        if (answer.toLowerCase() !== 'y') {
+          console.log('Aborted.')
+          return
+        }
+      }
+      const config: Record<string, unknown> = {
+        model: options.model,
+        temperature: options.temperature,
+        sourceLang: options.sourceLang,
+        targetLangs: options.targetLangs,
+        sourceDir: options.sourceDir,
+        targetDir: options.targetDir,
+        provider: options.provider,
+        useLangCodeAsFilename: options.useLangCodeAsFilename,
+      }
+      if (options.apiKey) {
+        config.apiKey = options.apiKey
+      }
+      const configContent = `import type { Config } from 'speranto/src/types'
+
+export default ${JSON.stringify(config, null, 2)} satisfies Partial<Config>
+`
+      await writeFile(configPath, configContent)
+      console.log(`Config written to ${configPath}`)
+      return
+    }
+
     const passedConfig = await loadConfig(options.config)
     try {
       const config: Config = Object.assign(
