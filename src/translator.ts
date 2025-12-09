@@ -29,7 +29,6 @@ export class Translator {
 
   private createLLMProvider(): LLMInterface {
     const provider = this.options.provider || 'ollama'
-    console.log(`Using ${provider} provider`)
 
     switch (provider) {
       case 'openai':
@@ -51,15 +50,9 @@ export class Translator {
       )
       if (existsSync(instructionsPath)) {
         this.languageInstructions = await readFile(instructionsPath, 'utf-8')
-        console.log(`Loaded language instructions for ${this.options.targetLang}`)
-      } else {
-        console.log(`No specific instructions found for ${this.options.targetLang}`)
       }
-    } catch (error) {
-      console.error(
-        `Error loading language instructions for ${this.options.targetLang}:`,
-        error,
-      )
+    } catch {
+      // Ignore errors loading instructions
     }
   }
 
@@ -129,25 +122,17 @@ export class Translator {
     strings: Array<{ key: string; value: string }>,
   ): Promise<Array<{ key: string; value: string }>> {
     if (strings.length === 0) return strings
-    console.log(`Translating group "${groupKey}" with ${strings.length} strings`)
     await this.isModelReady
 
     const jsonInput = Object.fromEntries(strings.map(({ key, value }) => [key, value]))
 
     const prompt = this.constructGroupPrompt(groupKey, jsonInput)
 
-    try {
-      const response = await this.llm.generate(prompt, {
-        temperature: this.options.temperature,
-      })
+    const response = await this.llm.generate(prompt, {
+      temperature: this.options.temperature,
+    })
 
-      const parsed = this.parseGroupResponse(response.content, strings)
-      console.log(`Translated group "${groupKey}" to ${this.options.targetLang}`)
-      return parsed
-    } catch (error) {
-      console.error(`Translation error for group "${groupKey}":`, error)
-      throw error
-    }
+    return this.parseGroupResponse(response.content, strings)
   }
 
   private constructGroupPrompt(groupKey: string, jsonInput: Record<string, string>): string {
