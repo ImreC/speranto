@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { parseJS, extractTranslatableStringsJS, reconstructJS } from '../../src/parsers/js'
+import { parseJS, extractTranslatableStringsJS, extractTranslatableGroupsJS, reconstructJS } from '../../src/parsers/js'
 
 test('parseJS should parse JavaScript code', async () => {
   const content = `const config = { title: "Hello", description: "Welcome" };`
@@ -90,4 +90,57 @@ const config = {
 
   expect(result).toContain('`Hola Mundo`')
   expect(result).toContain('`Bienvenido`')
+})
+
+test('extractTranslatableGroupsJS should group nested objects', async () => {
+  const content = `
+    export default {
+      siteTitle: "My Site",
+      nav: {
+        home: "Home",
+        blog: "Blog",
+        about: "About"
+      },
+      footer: {
+        copyright: "Copyright 2024",
+        contact: "Contact Us"
+      }
+    };
+  `
+
+  const ast = await parseJS(content)
+  const groups = await extractTranslatableGroupsJS(ast)
+
+  expect(groups).toHaveLength(3)
+
+  const rootGroup = groups.find(g => g.groupKey === '_root')
+  expect(rootGroup).toBeDefined()
+  expect(rootGroup!.strings).toHaveLength(1)
+
+  const navGroup = groups.find(g => g.groupKey === 'nav')
+  expect(navGroup).toBeDefined()
+  expect(navGroup!.strings).toHaveLength(3)
+  expect(navGroup!.strings.map(s => s.value)).toContain('Home')
+
+  const footerGroup = groups.find(g => g.groupKey === 'footer')
+  expect(footerGroup).toBeDefined()
+  expect(footerGroup!.strings).toHaveLength(2)
+})
+
+test('extractTranslatableStringsJS should include objectPath for nested properties', async () => {
+  const content = `
+    const config = {
+      nav: {
+        home: "Home",
+        blog: "Blog"
+      }
+    };
+  `
+
+  const ast = await parseJS(content)
+  const strings = await extractTranslatableStringsJS(ast)
+
+  expect(strings).toHaveLength(2)
+  expect(strings[0]!.objectPath).toEqual(['nav', 'home'])
+  expect(strings[1]!.objectPath).toEqual(['nav', 'blog'])
 })

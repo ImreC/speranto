@@ -123,4 +123,74 @@ export class Translator {
       throw error
     }
   }
+
+  async translateGroup(
+    groupKey: string,
+    strings: Array<{ key: string; value: string }>,
+  ): Promise<Array<{ key: string; value: string }>> {
+    if (strings.length === 0) return strings
+    console.log(`Translating group "${groupKey}" with ${strings.length} strings`)
+    await this.isModelReady
+
+    const jsonInput = Object.fromEntries(strings.map(({ key, value }) => [key, value]))
+
+    const prompt = this.constructGroupPrompt(groupKey, jsonInput)
+
+    try {
+      const response = await this.llm.generate(prompt, {
+        temperature: this.options.temperature,
+      })
+
+      const parsed = this.parseGroupResponse(response.content, strings)
+      console.log(`Translated group "${groupKey}" to ${this.options.targetLang}`)
+      return parsed
+    } catch (error) {
+      console.error(`Translation error for group "${groupKey}":`, error)
+      throw error
+    }
+  }
+
+  private constructGroupPrompt(groupKey: string, jsonInput: Record<string, string>): string {
+    let prompt =
+      'You are a professional translator who is going to be asked to translate a JSON object containing related text strings. '
+
+    if (this.languageInstructions) {
+      prompt += `\n\nYou are following these language-specific guidelines:\n${this.languageInstructions}`
+    }
+
+    prompt += `\n\nThese strings belong to the "${groupKey}" section/page of an application. Ensure consistency in terminology and style across all strings in this group.`
+
+    prompt += `\n\nYou maintain the original JSON structure exactly. You respond with valid JSON only, no additional text or explanation.`
+
+    prompt += `\n\nTranslate the following JSON from ${this.options.sourceLang} to ${this.options.targetLang}:\n\n${JSON.stringify(jsonInput, null, 2)}`
+
+    return prompt
+  }
+
+  private parseGroupResponse(
+    response: string,
+    originalStrings: Array<{ key: string; value: string }>,
+  ): Array<{ key: string; value: string }> {
+    let cleaned = response.trim()
+    if (cleaned.startsWith('```json')) {
+      cleaned = cleaned.slice(7)
+    } else if (cleaned.startsWith('```')) {
+      cleaned = cleaned.slice(3)
+    }
+    if (cleaned.endsWith('```')) {
+      cleaned = cleaned.slice(0, -3)
+    }
+    cleaned = cleaned.trim()
+
+    try {
+      const parsed = JSON.parse(cleaned) as Record<string, string>
+      return originalStrings.map(({ key }) => ({
+        key,
+        value: parsed[key] ?? originalStrings.find((s) => s.key === key)?.value ?? '',
+      }))
+    } catch {
+      console.warn('Failed to parse group translation response as JSON, falling back to individual translations')
+      return originalStrings
+    }
+  }
 }

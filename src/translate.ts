@@ -1,14 +1,14 @@
 import { glob } from 'glob'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { join, dirname, relative, extname, basename } from 'path'
+import { join, dirname, relative, extname } from 'path'
 import { getTranslatableChunks, parseMarkdown, stringifyMarkdown } from './parsers/md'
 import {
   parseJSON,
   stringifyJSON,
-  extractTranslatableStrings,
+  extractTranslatableGroups,
   reconstructJSON,
 } from './parsers/json'
-import { parseJS, extractTranslatableStringsJS, reconstructJS } from './parsers/js'
+import { parseJS, extractTranslatableGroupsJS, reconstructJS } from './parsers/js'
 import { Translator } from './translator'
 // import { visit } from 'unist-util-visit'
 import type { Config } from './types'
@@ -159,18 +159,32 @@ async function translateJSONFile(
     const content = await readFile(filePath, 'utf-8')
 
     const jsonData = await parseJSON(content)
-    const strings = await extractTranslatableStrings(jsonData)
+    const groups = await extractTranslatableGroups(jsonData)
 
-    console.log(`Found ${strings.length} strings to translate`)
+    const totalStrings = groups.reduce((sum, g) => sum + g.strings.length, 0)
+    console.log(`Found ${totalStrings} strings in ${groups.length} groups to translate`)
 
-    const translatedStrings = await Promise.all(
-      strings.map(async ({ path, value }) => {
-        const translatedText = await translator.translateText(value)
-        return { path, value: translatedText }
-      }),
-    )
+    const allTranslatedStrings: Array<{ path: string[]; value: string }> = []
 
-    const translatedJSON = await reconstructJSON(jsonData, translatedStrings)
+    for (const group of groups) {
+      const groupStrings = group.strings.map(({ path, value }) => ({
+        key: path.join('.'),
+        value,
+      }))
+
+      const translatedGroupStrings = await translator.translateGroup(group.groupKey, groupStrings)
+
+      for (let i = 0; i < group.strings.length; i++) {
+        const original = group.strings[i]!
+        const translated = translatedGroupStrings[i]!
+        allTranslatedStrings.push({
+          path: original.path,
+          value: translated.value,
+        })
+      }
+    }
+
+    const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
     const translatedContent = await stringifyJSON(translatedJSON)
 
     const relativePath = await writeOutput(config, filePath, translatedContent, targetLang)
@@ -192,18 +206,32 @@ async function translateJSFile(
     const content = await readFile(filePath, 'utf-8')
 
     const ast = await parseJS(content, isTypeScript)
-    const strings = await extractTranslatableStringsJS(ast)
+    const groups = await extractTranslatableGroupsJS(ast)
 
-    console.log(`Found ${strings.length} strings to translate`)
+    const totalStrings = groups.reduce((sum, g) => sum + g.strings.length, 0)
+    console.log(`Found ${totalStrings} strings in ${groups.length} groups to translate`)
 
-    const translatedStrings = await Promise.all(
-      strings.map(async ({ path, value }) => {
-        const translatedText = await translator.translateText(value)
-        return { path, value: translatedText }
-      }),
-    )
+    const allTranslatedStrings: Array<{ path: string; value: string }> = []
 
-    const translatedContent = await reconstructJS(ast, translatedStrings)
+    for (const group of groups) {
+      const groupStrings = group.strings.map(({ path, objectPath, value }) => ({
+        key: objectPath.length > 0 ? objectPath.join('.') : path,
+        value,
+      }))
+
+      const translatedGroupStrings = await translator.translateGroup(group.groupKey, groupStrings)
+
+      for (let i = 0; i < group.strings.length; i++) {
+        const original = group.strings[i]!
+        const translated = translatedGroupStrings[i]!
+        allTranslatedStrings.push({
+          path: original.path,
+          value: translated.value,
+        })
+      }
+    }
+
+    const translatedContent = await reconstructJS(ast, allTranslatedStrings)
 
     const relativePath = await writeOutput(config, filePath, translatedContent, targetLang)
 

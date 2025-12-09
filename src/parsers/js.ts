@@ -15,11 +15,17 @@ const generate = resolveDefault<typeof _generate.default>(_generate)
 
 export interface TranslatableJSString {
   path: string
+  objectPath: string[]
   value: string
   loc?: {
     start: { line: number; column: number }
     end: { line: number; column: number }
   }
+}
+
+export interface TranslatableJSGroup {
+  groupKey: string
+  strings: TranslatableJSString[]
 }
 
 export async function parseJS(
@@ -32,6 +38,25 @@ export async function parseJS(
   })
 }
 
+function getObjectPath(path: any): string[] {
+  const objectPath: string[] = []
+  let current = path.parentPath
+
+  while (current) {
+    if (current.node.type === 'ObjectProperty' && current.node.key) {
+      const key = current.node.key
+      if (key.type === 'Identifier') {
+        objectPath.unshift(key.name)
+      } else if (key.type === 'StringLiteral') {
+        objectPath.unshift(key.value)
+      }
+    }
+    current = current.parentPath
+  }
+
+  return objectPath
+}
+
 export async function extractTranslatableStringsJS(
   ast: t.File,
 ): Promise<TranslatableJSString[]> {
@@ -40,30 +65,31 @@ export async function extractTranslatableStringsJS(
 
   traverse(ast, {
     StringLiteral(path: any) {
-      // Check if the string is in an object property value position
       if (
         path.parent.type === 'ObjectProperty' &&
         path.parent.value === path.node &&
         !isVariableReference(path)
       ) {
+        const objectPath = getObjectPath(path)
         results.push({
           path: `string_${nodeCounter++}`,
+          objectPath,
           value: path.node.value,
           loc: path.node.loc || undefined,
         })
       }
     },
     TemplateLiteral(path: any) {
-      // Skip template literals with expressions (like ${SITE_TITLE})
       if (path.node.expressions.length > 0) {
         return
       }
 
-      // Check if it's in an object property value position
       if (path.parent.type === 'ObjectProperty' && path.parent.value === path.node) {
         const value = path.node.quasis[0].value.raw
+        const objectPath = getObjectPath(path)
         results.push({
           path: `template_${nodeCounter++}`,
+          objectPath,
           value,
           loc: path.node.loc || undefined,
         })
@@ -72,6 +98,39 @@ export async function extractTranslatableStringsJS(
   })
 
   return results
+}
+
+export async function extractTranslatableGroupsJS(
+  ast: t.File,
+): Promise<TranslatableJSGroup[]> {
+  const strings = await extractTranslatableStringsJS(ast)
+  const groups = new Map<string, TranslatableJSString[]>()
+
+  for (const item of strings) {
+    let groupKey: string
+
+    if (item.objectPath.length >= 2) {
+      // Nested structure: use the first level as group key (e.g., "nav" from ["nav", "home"])
+      groupKey = item.objectPath[0]!
+    } else if (item.objectPath.length === 1) {
+      // Single level: check for dot notation in the key itself
+      const key = item.objectPath[0]!
+      const dotIndex = key.indexOf('.')
+      groupKey = dotIndex > 0 ? key.substring(0, dotIndex) : '_root'
+    } else {
+      groupKey = '_root'
+    }
+
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, [])
+    }
+    groups.get(groupKey)!.push(item)
+  }
+
+  return Array.from(groups.entries()).map(([groupKey, strings]) => ({
+    groupKey,
+    strings,
+  }))
 }
 
 function isVariableReference(_path: any): boolean {
