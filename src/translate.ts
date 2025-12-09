@@ -1,5 +1,6 @@
 import { glob } from 'glob'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join, dirname, relative, extname } from 'path'
 import { getTranslatableChunks, parseMarkdown, stringifyMarkdown } from './parsers/md'
 import {
@@ -7,10 +8,10 @@ import {
   stringifyJSON,
   extractTranslatableGroups,
   reconstructJSON,
+  type TranslatableGroup,
 } from './parsers/json'
-import { parseJS, extractTranslatableGroupsJS, reconstructJS } from './parsers/js'
+import { parseJS, extractTranslatableGroupsJS, reconstructJS, type TranslatableJSGroup } from './parsers/js'
 import { Translator } from './translator'
-// import { visit } from 'unist-util-visit'
 import type { Config } from './types'
 import type { Root, BlockContent } from 'mdast'
 
@@ -66,32 +67,35 @@ export async function translate(config: Config) {
   console.log('Translation complete!')
 }
 
+function getTargetPath(config: Config, filePath: string, targetLang: string): string {
+  const relativePath = relative(config.sourceDir, filePath)
+  if (config.useLangCodeAsFilename) {
+    const ext = extname(filePath)
+    const dirPath = dirname(relativePath)
+    return join(
+      config.targetDir.replace('[lang]', targetLang),
+      dirPath,
+      `${targetLang}${ext}`,
+    )
+  } else {
+    return join(config.targetDir.replace('[lang]', targetLang), relativePath)
+  }
+}
+
 async function writeOutput(
   config: Config,
   filePath: string,
   translatedContent: string,
   targetLang: string,
 ) {
-  const relativePath = relative(config.sourceDir, filePath)
-  let targetPath: string
-  if (config.useLangCodeAsFilename) {
-    const ext = extname(filePath)
-    const dirPath = dirname(relativePath)
-    targetPath = join(
-      config.targetDir.replace('[lang]', targetLang),
-      dirPath,
-      `${targetLang}${ext}`,
-    )
-  } else {
-    targetPath = join(config.targetDir.replace('[lang]', targetLang), relativePath)
-  }
+  const targetPath = getTargetPath(config, filePath, targetLang)
   console.log(`Saving result in targetPath: ${targetPath}`)
 
   await mkdir(dirname(targetPath), { recursive: true })
 
   await writeFile(targetPath, translatedContent, 'utf-8')
 
-  return relativePath
+  return relative(config.sourceDir, filePath)
 }
 
 async function translateMarkdownFile(
@@ -148,6 +152,25 @@ async function translateMarkdownFile(
   }
 }
 
+function hasGroupChanged(
+  sourceGroup: TranslatableGroup,
+  existingGroups: TranslatableGroup[],
+): boolean {
+  const existingGroup = existingGroups.find((g) => g.groupKey === sourceGroup.groupKey)
+  if (!existingGroup) return true
+
+  if (sourceGroup.strings.length !== existingGroup.strings.length) return true
+
+  for (const sourceString of sourceGroup.strings) {
+    const existingString = existingGroup.strings.find(
+      (s) => s.path.join('.') === sourceString.path.join('.'),
+    )
+    if (!existingString) return true
+  }
+
+  return false
+}
+
 async function translateJSONFile(
   filePath: string,
   config: Config,
@@ -161,12 +184,53 @@ async function translateJSONFile(
     const jsonData = await parseJSON(content)
     const groups = await extractTranslatableGroups(jsonData)
 
+    const targetPath = getTargetPath(config, filePath, targetLang)
+    let existingTranslations: Map<string, string> = new Map()
+    let existingGroups: TranslatableGroup[] = []
+
+    if (existsSync(targetPath)) {
+      try {
+        const existingContent = await readFile(targetPath, 'utf-8')
+        const existingJSON = await parseJSON(existingContent)
+        existingGroups = await extractTranslatableGroups(existingJSON)
+
+        for (const group of existingGroups) {
+          for (const str of group.strings) {
+            existingTranslations.set(str.path.join('.'), str.value)
+          }
+        }
+        console.log(`Found existing translation with ${existingTranslations.size} strings`)
+      } catch {
+        console.log(`Could not parse existing translation at ${targetPath}, will retranslate all`)
+      }
+    }
+
     const totalStrings = groups.reduce((sum, g) => sum + g.strings.length, 0)
-    console.log(`Found ${totalStrings} strings in ${groups.length} groups to translate`)
+    const changedGroups = groups.filter((g) => hasGroupChanged(g, existingGroups))
+    const unchangedGroups = groups.filter((g) => !hasGroupChanged(g, existingGroups))
+
+    if (changedGroups.length === 0) {
+      console.log(`All ${groups.length} groups unchanged, skipping ${filePath}`)
+      return
+    }
+
+    console.log(
+      `Found ${totalStrings} strings in ${groups.length} groups, ${changedGroups.length} groups need translation`,
+    )
 
     const allTranslatedStrings: Array<{ path: string[]; value: string }> = []
 
-    for (const group of groups) {
+    for (const group of unchangedGroups) {
+      for (const str of group.strings) {
+        const existingValue = existingTranslations.get(str.path.join('.'))
+        allTranslatedStrings.push({
+          path: str.path,
+          value: existingValue ?? str.value,
+        })
+      }
+    }
+
+    for (const group of changedGroups) {
       const groupStrings = group.strings.map(({ path, value }) => ({
         key: path.join('.'),
         value,
@@ -194,6 +258,27 @@ async function translateJSONFile(
   }
 }
 
+function hasJSGroupChanged(
+  sourceGroup: TranslatableJSGroup,
+  existingGroups: TranslatableJSGroup[],
+): boolean {
+  const existingGroup = existingGroups.find((g) => g.groupKey === sourceGroup.groupKey)
+  if (!existingGroup) return true
+
+  if (sourceGroup.strings.length !== existingGroup.strings.length) return true
+
+  for (const sourceString of sourceGroup.strings) {
+    const sourceKey = sourceString.objectPath.join('.') || sourceString.path
+    const existingString = existingGroup.strings.find((s) => {
+      const existingKey = s.objectPath.join('.') || s.path
+      return existingKey === sourceKey
+    })
+    if (!existingString) return true
+  }
+
+  return false
+}
+
 async function translateJSFile(
   filePath: string,
   config: Config,
@@ -208,12 +293,55 @@ async function translateJSFile(
     const ast = await parseJS(content, isTypeScript)
     const groups = await extractTranslatableGroupsJS(ast)
 
+    const targetPath = getTargetPath(config, filePath, targetLang)
+    let existingTranslations: Map<string, string> = new Map()
+    let existingGroups: TranslatableJSGroup[] = []
+
+    if (existsSync(targetPath)) {
+      try {
+        const existingContent = await readFile(targetPath, 'utf-8')
+        const existingAST = await parseJS(existingContent, isTypeScript)
+        existingGroups = await extractTranslatableGroupsJS(existingAST)
+
+        for (const group of existingGroups) {
+          for (const str of group.strings) {
+            const key = str.objectPath.join('.') || str.path
+            existingTranslations.set(key, str.value)
+          }
+        }
+        console.log(`Found existing translation with ${existingTranslations.size} strings`)
+      } catch {
+        console.log(`Could not parse existing translation at ${targetPath}, will retranslate all`)
+      }
+    }
+
     const totalStrings = groups.reduce((sum, g) => sum + g.strings.length, 0)
-    console.log(`Found ${totalStrings} strings in ${groups.length} groups to translate`)
+    const changedGroups = groups.filter((g) => hasJSGroupChanged(g, existingGroups))
+    const unchangedGroups = groups.filter((g) => !hasJSGroupChanged(g, existingGroups))
+
+    if (changedGroups.length === 0) {
+      console.log(`All ${groups.length} groups unchanged, skipping ${filePath}`)
+      return
+    }
+
+    console.log(
+      `Found ${totalStrings} strings in ${groups.length} groups, ${changedGroups.length} groups need translation`,
+    )
 
     const allTranslatedStrings: Array<{ path: string; value: string }> = []
 
-    for (const group of groups) {
+    for (const group of unchangedGroups) {
+      for (const str of group.strings) {
+        const key = str.objectPath.join('.') || str.path
+        const existingValue = existingTranslations.get(key)
+        allTranslatedStrings.push({
+          path: str.path,
+          value: existingValue ?? str.value,
+        })
+      }
+    }
+
+    for (const group of changedGroups) {
       const groupStrings = group.strings.map(({ path, objectPath, value }) => ({
         key: objectPath.length > 0 ? objectPath.join('.') : path,
         value,

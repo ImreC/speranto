@@ -197,3 +197,112 @@ test('translate should find files in nested directories', async () => {
   expect(apiContent).toBeDefined()
   expect(guideContent).toBeDefined()
 })
+
+test('translate should skip unchanged JSON groups and reuse existing translations', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  let callCount = 0
+  const originalGenerate = mockProvider.generate.bind(mockProvider)
+  mockProvider.generate = async (...args) => {
+    callCount++
+    return originalGenerate(...args)
+  }
+
+  const jsonContent = {
+    nav: {
+      home: 'Home',
+      about: 'About',
+    },
+    footer: {
+      copyright: 'Copyright 2024',
+    },
+  }
+  await writeFile(join(sourceDir, 'test.json'), JSON.stringify(jsonContent, null, 2))
+
+  const existingTranslation = {
+    nav: {
+      home: 'Inicio',
+      about: 'Acerca de',
+    },
+    footer: {
+      copyright: 'Derechos reservados 2024',
+    },
+  }
+  await mkdir(join(targetDir, 'es'), { recursive: true })
+  await writeFile(
+    join(targetDir, 'es', 'test.json'),
+    JSON.stringify(existingTranslation, null, 2),
+  )
+
+  const config: Config = {
+    model: 'test-model',
+    temperature: 0.7,
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    sourceDir,
+    targetDir: join(targetDir, '[lang]'),
+    provider: 'mistral',
+    llm: mockProvider,
+  }
+
+  await translate(config)
+
+  expect(callCount).toBe(0)
+
+  const outputPath = join(targetDir, 'es', 'test.json')
+  const outputContent = await readFile(outputPath, 'utf-8')
+  const output = JSON.parse(outputContent)
+  expect(output.nav.home).toBe('Inicio')
+  expect(output.footer.copyright).toBe('Derechos reservados 2024')
+})
+
+test('translate should retranslate groups with new keys', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  let callCount = 0
+  const originalGenerate = mockProvider.generate.bind(mockProvider)
+  mockProvider.generate = async (...args) => {
+    callCount++
+    return originalGenerate(...args)
+  }
+
+  const jsonContent = {
+    nav: {
+      home: 'Home',
+      about: 'About',
+      contact: 'Contact',
+    },
+    footer: {
+      copyright: 'Copyright 2024',
+    },
+  }
+  await writeFile(join(sourceDir, 'test.json'), JSON.stringify(jsonContent, null, 2))
+
+  const existingTranslation = {
+    nav: {
+      home: 'Inicio',
+      about: 'Acerca de',
+    },
+    footer: {
+      copyright: 'Derechos reservados 2024',
+    },
+  }
+  await mkdir(join(targetDir, 'es'), { recursive: true })
+  await writeFile(
+    join(targetDir, 'es', 'test.json'),
+    JSON.stringify(existingTranslation, null, 2),
+  )
+
+  const config: Config = {
+    model: 'test-model',
+    temperature: 0.7,
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    sourceDir,
+    targetDir: join(targetDir, '[lang]'),
+    provider: 'mistral',
+    llm: mockProvider,
+  }
+
+  await translate(config)
+
+  expect(callCount).toBe(1)
+})
