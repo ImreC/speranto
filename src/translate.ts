@@ -2,6 +2,7 @@ import { glob } from 'glob'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname, relative, extname } from 'path'
+import { Listr } from 'listr2'
 import { getTranslatableChunks, parseMarkdown, stringifyMarkdown } from './parsers/md'
 import {
   parseJSON,
@@ -37,36 +38,54 @@ export async function translate(config: Config) {
   const allFiles = await Promise.all(patterns.map((pattern) => glob(pattern)))
   const files = allFiles.flat()
 
-  console.log(`Found ${files.length} file${files.length !== 1 ? 's' : ''} to translate`)
-
-  for (const targetLang of config.targetLangs) {
-    console.log(`Translating to ${targetLang}...`)
-
-    const translator = new Translator({
-      model: config.model,
-      temperature: config.temperature,
-      sourceLang: config.sourceLang,
-      targetLang: targetLang,
-      provider: config.provider,
-      apiKey: config.apiKey,
-      llm: config.llm,
-    })
-
-    await Promise.all(
-      files.map((file) => {
-        const ext = extname(file)
-        if (ext === '.md') {
-          return translateMarkdownFile(file, config, targetLang, translator)
-        } else if (ext === '.json') {
-          return translateJSONFile(file, config, targetLang, translator)
-        } else if (ext === '.js' || ext === '.ts') {
-          return translateJSFile(file, config, targetLang, translator, ext === '.ts')
-        }
-      }),
-    )
+  if (files.length === 0) {
+    console.log('No files found to translate.')
+    return
   }
 
-  console.log('Translation complete!')
+  const tasks = new Listr(
+    config.targetLangs.map((targetLang) => ({
+      title: `Translating to ${targetLang}`,
+      task: (_ctx: unknown, task) => {
+        const translator = new Translator({
+          model: config.model,
+          temperature: config.temperature,
+          sourceLang: config.sourceLang,
+          targetLang: targetLang,
+          provider: config.provider,
+          apiKey: config.apiKey,
+          llm: config.llm,
+        })
+
+        return task.newListr(
+          files.map((file) => {
+            const ext = extname(file)
+            const relativePath = relative(config.sourceDir, file)
+
+            return {
+              title: relativePath,
+              task: async (_ctx: unknown, fileTask) => {
+                if (ext === '.md') {
+                  return translateMarkdownFile(file, config, targetLang, translator, fileTask)
+                } else if (ext === '.json') {
+                  return translateJSONFile(file, config, targetLang, translator, fileTask)
+                } else if (ext === '.js' || ext === '.ts') {
+                  return translateJSFile(file, config, targetLang, translator, ext === '.ts', fileTask)
+                }
+              },
+            }
+          }),
+          { concurrent: true },
+        )
+      },
+    })),
+    {
+      concurrent: false,
+      renderer: 'simple' as const,
+    },
+  )
+
+  await tasks.run()
 }
 
 function getTargetPath(config: Config, filePath: string, targetLang: string): string {
@@ -74,11 +93,7 @@ function getTargetPath(config: Config, filePath: string, targetLang: string): st
   if (config.useLangCodeAsFilename) {
     const ext = extname(filePath)
     const dirPath = dirname(relativePath)
-    return join(
-      config.targetDir.replace('[lang]', targetLang),
-      dirPath,
-      `${targetLang}${ext}`,
-    )
+    return join(config.targetDir.replace('[lang]', targetLang), dirPath, `${targetLang}${ext}`)
   } else {
     return join(config.targetDir.replace('[lang]', targetLang), relativePath)
   }
@@ -91,10 +106,8 @@ async function writeOutput(
   targetLang: string,
 ) {
   const targetPath = getTargetPath(config, filePath, targetLang)
-  console.log(`Saving result in targetPath: ${targetPath}`)
 
   await mkdir(dirname(targetPath), { recursive: true })
-
   await writeFile(targetPath, translatedContent, 'utf-8')
 
   return relative(config.sourceDir, filePath)
@@ -105,53 +118,46 @@ async function translateMarkdownFile(
   config: Config,
   targetLang: string,
   translator: Translator,
+  task: any,
 ) {
-  try {
-    // Read source file
-    console.log(`Reading source file ${filePath}`)
-    const content = await readFile(filePath, 'utf-8')
+  const content = await readFile(filePath, 'utf-8')
+  const tree = await parseMarkdown(content)
+  const chunks = await getTranslatableChunks(tree)
+  const relativePath = relative(config.sourceDir, filePath)
 
-    // Parse markdown
-    const tree = await parseMarkdown(content)
-    const chunks = await getTranslatableChunks(tree)
+  task.title = `${relativePath} (${chunks.length} chunks)`
 
-    console.log(`Created ${chunks.length} chunks`)
+  const translatedTree: Root = JSON.parse(JSON.stringify(tree))
 
-    const translatedTree: Root = JSON.parse(JSON.stringify(tree))
+  const translatedChunks = await Promise.all(
+    chunks.map(async (chunk) => {
+      const translatedText = await translator.translateChunk(chunk)
+      return {
+        ...chunk,
+        text: translatedText,
+      }
+    }),
+  )
 
-    const translatedChunks = await Promise.all(
-      chunks.map(async (chunk) => {
-        const translatedText = await translator.translateChunk(chunk)
-        return {
-          ...chunk,
-          text: translatedText,
-        }
-      }),
-    )
-
-    for (const translatedChunk of translatedChunks) {
-      const translatedNodes = await parseMarkdown(translatedChunk.text)
-      let nodeIndex = 0
-      for (
-        let i = translatedChunk.startIndex;
-        i <= translatedChunk.endIndex && i < translatedTree.children.length;
-        i++
-      ) {
-        if (nodeIndex < translatedNodes.children.length) {
-          translatedTree.children[i] = translatedNodes.children[nodeIndex] as BlockContent
-          nodeIndex++
-        }
+  for (const translatedChunk of translatedChunks) {
+    const translatedNodes = await parseMarkdown(translatedChunk.text)
+    let nodeIndex = 0
+    for (
+      let i = translatedChunk.startIndex;
+      i <= translatedChunk.endIndex && i < translatedTree.children.length;
+      i++
+    ) {
+      if (nodeIndex < translatedNodes.children.length) {
+        translatedTree.children[i] = translatedNodes.children[nodeIndex] as BlockContent
+        nodeIndex++
       }
     }
-
-    let translatedContent = await stringifyMarkdown(translatedTree)
-    translatedContent += `\n\n_Translated automatically with ${config.model}. The original content was written in ${config.sourceLang}. Please allow for minor errors._`
-
-    const relativePath = await writeOutput(config, filePath, translatedContent, targetLang)
-    console.log(`Translated ${relativePath} -> ${targetLang}`)
-  } catch (error) {
-    console.error(`Error translating ${filePath}:`, error)
   }
+
+  let translatedContent = await stringifyMarkdown(translatedTree)
+  translatedContent += `\n\n_Translated automatically with ${config.model}. The original content was written in ${config.sourceLang}. Please allow for minor errors._`
+
+  await writeOutput(config, filePath, translatedContent, targetLang)
 }
 
 function hasGroupChanged(
@@ -178,88 +184,100 @@ async function translateJSONFile(
   config: Config,
   targetLang: string,
   translator: Translator,
+  task: any,
 ) {
-  try {
-    console.log(`Reading JSON file ${filePath}`)
-    const content = await readFile(filePath, 'utf-8')
+  const content = await readFile(filePath, 'utf-8')
+  const jsonData = await parseJSON(content)
+  const groups = await extractTranslatableGroups(jsonData)
+  const relativePath = relative(config.sourceDir, filePath)
 
-    const jsonData = await parseJSON(content)
-    const groups = await extractTranslatableGroups(jsonData)
+  const targetPath = getTargetPath(config, filePath, targetLang)
+  let existingTranslations: Map<string, string> = new Map()
+  let existingGroups: TranslatableGroup[] = []
 
-    const targetPath = getTargetPath(config, filePath, targetLang)
-    let existingTranslations: Map<string, string> = new Map()
-    let existingGroups: TranslatableGroup[] = []
+  if (existsSync(targetPath)) {
+    try {
+      const existingContent = await readFile(targetPath, 'utf-8')
+      const existingJSON = await parseJSON(existingContent)
+      existingGroups = await extractTranslatableGroups(existingJSON)
 
-    if (existsSync(targetPath)) {
-      try {
-        const existingContent = await readFile(targetPath, 'utf-8')
-        const existingJSON = await parseJSON(existingContent)
-        existingGroups = await extractTranslatableGroups(existingJSON)
-
-        for (const group of existingGroups) {
-          for (const str of group.strings) {
-            existingTranslations.set(str.path.join('.'), str.value)
-          }
+      for (const group of existingGroups) {
+        for (const str of group.strings) {
+          existingTranslations.set(str.path.join('.'), str.value)
         }
-        console.log(`Found existing translation with ${existingTranslations.size} strings`)
-      } catch {
-        console.log(`Could not parse existing translation at ${targetPath}, will retranslate all`)
       }
+    } catch {
+      // Could not parse existing, will retranslate all
     }
-
-    const totalStrings = groups.reduce((sum, g) => sum + g.strings.length, 0)
-    const changedGroups = groups.filter((g) => hasGroupChanged(g, existingGroups))
-    const unchangedGroups = groups.filter((g) => !hasGroupChanged(g, existingGroups))
-
-    if (changedGroups.length === 0) {
-      console.log(`All ${groups.length} groups unchanged, skipping ${filePath}`)
-      return
-    }
-
-    console.log(
-      `Found ${totalStrings} strings in ${groups.length} groups, ${changedGroups.length} groups need translation`,
-    )
-
-    const allTranslatedStrings: Array<{ path: string[]; value: string }> = []
-
-    for (const group of unchangedGroups) {
-      for (const str of group.strings) {
-        const existingValue = existingTranslations.get(str.path.join('.'))
-        allTranslatedStrings.push({
-          path: str.path,
-          value: existingValue ?? str.value,
-        })
-      }
-    }
-
-    const translatedGroups = await Promise.all(
-      changedGroups.map(async (group) => {
-        const groupStrings = group.strings.map(({ path, value }) => ({
-          key: path.join('.'),
-          value,
-        }))
-
-        const translatedGroupStrings = await translator.translateGroup(group.groupKey, groupStrings)
-
-        return group.strings.map((original, i) => ({
-          path: original.path,
-          value: translatedGroupStrings[i]!.value,
-        }))
-      }),
-    )
-
-    for (const groupStrings of translatedGroups) {
-      allTranslatedStrings.push(...groupStrings)
-    }
-
-    const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
-    const translatedContent = await stringifyJSON(translatedJSON)
-
-    const relativePath = await writeOutput(config, filePath, translatedContent, targetLang)
-    console.log(`Translated ${relativePath} -> ${targetLang}`)
-  } catch (error) {
-    console.error(`Error translating ${filePath}:`, error)
   }
+
+  const changedGroups = groups.filter((g) => hasGroupChanged(g, existingGroups))
+  const unchangedGroups = groups.filter((g) => !hasGroupChanged(g, existingGroups))
+  const unchangedStrings = unchangedGroups.reduce((sum, g) => sum + g.strings.length, 0)
+
+  if (changedGroups.length === 0) {
+    task.skip(`${groups.length} groups unchanged`)
+    return
+  }
+
+  const changedStrings = changedGroups.reduce((sum, g) => sum + g.strings.length, 0)
+  task.title =
+    `${relativePath} (${changedGroups.length}/${groups.length} groups, ${changedStrings} strings)` +
+    (unchangedStrings > 0 ? ` [reusing ${unchangedStrings}]` : '')
+
+  const allTranslatedStrings: Array<{ path: string[]; value: string }> = []
+
+  for (const group of unchangedGroups) {
+    for (const str of group.strings) {
+      const existingValue = existingTranslations.get(str.path.join('.'))
+      allTranslatedStrings.push({
+        path: str.path,
+        value: existingValue ?? str.value,
+      })
+    }
+  }
+
+  return task.newListr(
+    [
+      {
+        title: `Translating ${changedGroups.length} groups`,
+        task: (_ctx: unknown, groupTask: any) =>
+          groupTask.newListr(
+            changedGroups.map((group) => ({
+              title: `"${group.groupKey}" (${group.strings.length} strings)`,
+              task: async () => {
+                const groupStrings = group.strings.map(({ path, value }) => ({
+                  key: path.join('.'),
+                  value,
+                }))
+
+                const translatedGroupStrings = await translator.translateGroup(
+                  group.groupKey,
+                  groupStrings,
+                )
+
+                for (let i = 0; i < group.strings.length; i++) {
+                  allTranslatedStrings.push({
+                    path: group.strings[i]!.path,
+                    value: translatedGroupStrings[i]!.value,
+                  })
+                }
+              },
+            })),
+            { concurrent: true },
+          ),
+      },
+      {
+        title: 'Writing output',
+        task: async () => {
+          const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
+          const translatedContent = await stringifyJSON(translatedJSON)
+          await writeOutput(config, filePath, translatedContent, targetLang)
+        },
+      },
+    ],
+    { concurrent: false },
+  )
 }
 
 function hasJSGroupChanged(
@@ -289,88 +307,99 @@ async function translateJSFile(
   targetLang: string,
   translator: Translator,
   isTypeScript: boolean,
+  task: any,
 ) {
-  try {
-    console.log(`Reading JS/TS file ${filePath}`)
-    const content = await readFile(filePath, 'utf-8')
+  const content = await readFile(filePath, 'utf-8')
+  const ast = await parseJS(content, isTypeScript)
+  const groups = await extractTranslatableGroupsJS(ast)
+  const relativePath = relative(config.sourceDir, filePath)
 
-    const ast = await parseJS(content, isTypeScript)
-    const groups = await extractTranslatableGroupsJS(ast)
+  const targetPath = getTargetPath(config, filePath, targetLang)
+  let existingTranslations: Map<string, string> = new Map()
+  let existingGroups: TranslatableJSGroup[] = []
 
-    const targetPath = getTargetPath(config, filePath, targetLang)
-    let existingTranslations: Map<string, string> = new Map()
-    let existingGroups: TranslatableJSGroup[] = []
+  if (existsSync(targetPath)) {
+    try {
+      const existingContent = await readFile(targetPath, 'utf-8')
+      const existingAST = await parseJS(existingContent, isTypeScript)
+      existingGroups = await extractTranslatableGroupsJS(existingAST)
 
-    if (existsSync(targetPath)) {
-      try {
-        const existingContent = await readFile(targetPath, 'utf-8')
-        const existingAST = await parseJS(existingContent, isTypeScript)
-        existingGroups = await extractTranslatableGroupsJS(existingAST)
-
-        for (const group of existingGroups) {
-          for (const str of group.strings) {
-            const key = str.objectPath.join('.') || str.path
-            existingTranslations.set(key, str.value)
-          }
+      for (const group of existingGroups) {
+        for (const str of group.strings) {
+          const key = str.objectPath.join('.') || str.path
+          existingTranslations.set(key, str.value)
         }
-        console.log(`Found existing translation with ${existingTranslations.size} strings`)
-      } catch {
-        console.log(`Could not parse existing translation at ${targetPath}, will retranslate all`)
       }
+    } catch {
+      // Could not parse existing, will retranslate all
     }
-
-    const totalStrings = groups.reduce((sum, g) => sum + g.strings.length, 0)
-    const changedGroups = groups.filter((g) => hasJSGroupChanged(g, existingGroups))
-    const unchangedGroups = groups.filter((g) => !hasJSGroupChanged(g, existingGroups))
-
-    if (changedGroups.length === 0) {
-      console.log(`All ${groups.length} groups unchanged, skipping ${filePath}`)
-      return
-    }
-
-    console.log(
-      `Found ${totalStrings} strings in ${groups.length} groups, ${changedGroups.length} groups need translation`,
-    )
-
-    const allTranslatedStrings: Array<{ path: string; value: string }> = []
-
-    for (const group of unchangedGroups) {
-      for (const str of group.strings) {
-        const key = str.objectPath.join('.') || str.path
-        const existingValue = existingTranslations.get(key)
-        allTranslatedStrings.push({
-          path: str.path,
-          value: existingValue ?? str.value,
-        })
-      }
-    }
-
-    const translatedGroups = await Promise.all(
-      changedGroups.map(async (group) => {
-        const groupStrings = group.strings.map(({ path, objectPath, value }) => ({
-          key: objectPath.length > 0 ? objectPath.join('.') : path,
-          value,
-        }))
-
-        const translatedGroupStrings = await translator.translateGroup(group.groupKey, groupStrings)
-
-        return group.strings.map((original, i) => ({
-          path: original.path,
-          value: translatedGroupStrings[i]!.value,
-        }))
-      }),
-    )
-
-    for (const groupStrings of translatedGroups) {
-      allTranslatedStrings.push(...groupStrings)
-    }
-
-    const translatedContent = await reconstructJS(ast, allTranslatedStrings)
-
-    const relativePath = await writeOutput(config, filePath, translatedContent, targetLang)
-
-    console.log(`Translated ${relativePath} -> ${targetLang}`)
-  } catch (error) {
-    console.error(`Error translating ${filePath}:`, error)
   }
+
+  const changedGroups = groups.filter((g) => hasJSGroupChanged(g, existingGroups))
+  const unchangedGroups = groups.filter((g) => !hasJSGroupChanged(g, existingGroups))
+  const unchangedStrings = unchangedGroups.reduce((sum, g) => sum + g.strings.length, 0)
+
+  if (changedGroups.length === 0) {
+    task.skip(`${groups.length} groups unchanged`)
+    return
+  }
+
+  const changedStrings = changedGroups.reduce((sum, g) => sum + g.strings.length, 0)
+  task.title =
+    `${relativePath} (${changedGroups.length}/${groups.length} groups, ${changedStrings} strings)` +
+    (unchangedStrings > 0 ? ` [reusing ${unchangedStrings}]` : '')
+
+  const allTranslatedStrings: Array<{ path: string; value: string }> = []
+
+  for (const group of unchangedGroups) {
+    for (const str of group.strings) {
+      const key = str.objectPath.join('.') || str.path
+      const existingValue = existingTranslations.get(key)
+      allTranslatedStrings.push({
+        path: str.path,
+        value: existingValue ?? str.value,
+      })
+    }
+  }
+
+  return task.newListr(
+    [
+      {
+        title: `Translating ${changedGroups.length} groups`,
+        task: (_ctx: unknown, groupTask: any) =>
+          groupTask.newListr(
+            changedGroups.map((group) => ({
+              title: `"${group.groupKey}" (${group.strings.length} strings)`,
+              task: async () => {
+                const groupStrings = group.strings.map(({ path, objectPath, value }) => ({
+                  key: objectPath.length > 0 ? objectPath.join('.') : path,
+                  value,
+                }))
+
+                const translatedGroupStrings = await translator.translateGroup(
+                  group.groupKey,
+                  groupStrings,
+                )
+
+                for (let i = 0; i < group.strings.length; i++) {
+                  allTranslatedStrings.push({
+                    path: group.strings[i]!.path,
+                    value: translatedGroupStrings[i]!.value,
+                  })
+                }
+              },
+            })),
+            { concurrent: true },
+          ),
+      },
+      {
+        title: 'Writing output',
+        task: async () => {
+          const translatedContent = await reconstructJS(ast, allTranslatedStrings)
+          await writeOutput(config, filePath, translatedContent, targetLang)
+        },
+      },
+    ],
+    { concurrent: false },
+  )
 }
