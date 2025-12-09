@@ -52,16 +52,18 @@ export async function translate(config: Config) {
       llm: config.llm,
     })
 
-    for (const file of files) {
-      const ext = extname(file)
-      if (ext === '.md') {
-        await translateMarkdownFile(file, config, targetLang, translator)
-      } else if (ext === '.json') {
-        await translateJSONFile(file, config, targetLang, translator)
-      } else if (ext === '.js' || ext === '.ts') {
-        await translateJSFile(file, config, targetLang, translator, ext === '.ts')
-      }
-    }
+    await Promise.all(
+      files.map((file) => {
+        const ext = extname(file)
+        if (ext === '.md') {
+          return translateMarkdownFile(file, config, targetLang, translator)
+        } else if (ext === '.json') {
+          return translateJSONFile(file, config, targetLang, translator)
+        } else if (ext === '.js' || ext === '.ts') {
+          return translateJSFile(file, config, targetLang, translator, ext === '.ts')
+        }
+      }),
+    )
   }
 
   console.log('Translation complete!')
@@ -230,22 +232,24 @@ async function translateJSONFile(
       }
     }
 
-    for (const group of changedGroups) {
-      const groupStrings = group.strings.map(({ path, value }) => ({
-        key: path.join('.'),
-        value,
-      }))
+    const translatedGroups = await Promise.all(
+      changedGroups.map(async (group) => {
+        const groupStrings = group.strings.map(({ path, value }) => ({
+          key: path.join('.'),
+          value,
+        }))
 
-      const translatedGroupStrings = await translator.translateGroup(group.groupKey, groupStrings)
+        const translatedGroupStrings = await translator.translateGroup(group.groupKey, groupStrings)
 
-      for (let i = 0; i < group.strings.length; i++) {
-        const original = group.strings[i]!
-        const translated = translatedGroupStrings[i]!
-        allTranslatedStrings.push({
+        return group.strings.map((original, i) => ({
           path: original.path,
-          value: translated.value,
-        })
-      }
+          value: translatedGroupStrings[i]!.value,
+        }))
+      }),
+    )
+
+    for (const groupStrings of translatedGroups) {
+      allTranslatedStrings.push(...groupStrings)
     }
 
     const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
@@ -341,22 +345,24 @@ async function translateJSFile(
       }
     }
 
-    for (const group of changedGroups) {
-      const groupStrings = group.strings.map(({ path, objectPath, value }) => ({
-        key: objectPath.length > 0 ? objectPath.join('.') : path,
-        value,
-      }))
+    const translatedGroups = await Promise.all(
+      changedGroups.map(async (group) => {
+        const groupStrings = group.strings.map(({ path, objectPath, value }) => ({
+          key: objectPath.length > 0 ? objectPath.join('.') : path,
+          value,
+        }))
 
-      const translatedGroupStrings = await translator.translateGroup(group.groupKey, groupStrings)
+        const translatedGroupStrings = await translator.translateGroup(group.groupKey, groupStrings)
 
-      for (let i = 0; i < group.strings.length; i++) {
-        const original = group.strings[i]!
-        const translated = translatedGroupStrings[i]!
-        allTranslatedStrings.push({
+        return group.strings.map((original, i) => ({
           path: original.path,
-          value: translated.value,
-        })
-      }
+          value: translatedGroupStrings[i]!.value,
+        }))
+      }),
+    )
+
+    for (const groupStrings of translatedGroups) {
+      allTranslatedStrings.push(...groupStrings)
     }
 
     const translatedContent = await reconstructJS(ast, allTranslatedStrings)

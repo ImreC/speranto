@@ -125,10 +125,8 @@ program
   .option('-m, --model <model>', 'Model to use for translation')
   .option('-t, --temperature <number>', 'Temperature for translation', parseFloat)
   .option('-s, --source-lang <lang>', 'Source language code')
-  .option(
-    '-l, --target-langs <langs>',
-    'Target language codes (comma-separated)',
-    (value) => value.split(','),
+  .option('-l, --target-langs <langs>', 'Target language codes (comma-separated)', (value) =>
+    value.split(','),
   )
   .option('-p, --provider <provider>', 'LLM provider (openai, ollama, mistral)')
   .option('-k, --api-key <key>', 'API key for LLM provider')
@@ -136,7 +134,9 @@ program
     const passedConfig = await loadConfig(options.config)
 
     if (!passedConfig.database) {
-      console.error('Error: Database configuration is required. Please specify database config.')
+      console.error(
+        'Error: Database configuration is required. Please specify database config.',
+      )
       process.exit(1)
     }
 
@@ -155,7 +155,9 @@ program
       }
 
       console.log(
-        `Starting database translation from ${config.sourceLang} to ${config.targetLangs.join(', ')} using model ${config.model}`,
+        `Starting database translation from ${config.sourceLang} to ${config.targetLangs.join(
+          ', ',
+        )} using model ${config.model}`,
       )
       console.log(`Database: ${config.database.type} - ${config.database.connection}`)
       console.log(`Tables: ${config.database.tables.map((t) => t.name).join(', ')}`)
