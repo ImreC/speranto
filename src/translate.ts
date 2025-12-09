@@ -11,29 +11,23 @@ import {
   reconstructJSON,
   type TranslatableGroup,
 } from './parsers/json'
-import { parseJS, extractTranslatableGroupsJS, reconstructJS, type TranslatableJSGroup } from './parsers/js'
+import {
+  parseJS,
+  extractTranslatableGroupsJS,
+  reconstructJS,
+  type TranslatableJSGroup,
+} from './parsers/js'
 import { Translator } from './translator'
 import type { Config } from './types'
 import type { Root, BlockContent } from 'mdast'
 
 export async function translate(config: Config) {
-  let patterns: string[]
-
-  if (config.useLangCodeAsFilename) {
-    patterns = [
-      join(config.sourceDir, `**/${config.sourceLang}.md`),
-      join(config.sourceDir, `**/${config.sourceLang}.json`),
-      join(config.sourceDir, `**/${config.sourceLang}.js`),
-      join(config.sourceDir, `**/${config.sourceLang}.ts`),
-    ]
-  } else {
-    patterns = [
-      join(config.sourceDir, '**/*.md'),
-      join(config.sourceDir, '**/*.json'),
-      join(config.sourceDir, '**/*.js'),
-      join(config.sourceDir, '**/*.ts'),
-    ]
-  }
+  const extensions = ['md', 'json', 'js', 'ts']
+  const patterns = extensions.map((ext) =>
+    config.useLangCodeAsFilename
+      ? join(config.sourceDir, `**/${config.sourceLang}.${ext}`)
+      : join(config.sourceDir, `**/*.${ext}`),
+  )
 
   const allFiles = await Promise.all(patterns.map((pattern) => glob(pattern)))
   const files = allFiles.flat()
@@ -45,21 +39,20 @@ export async function translate(config: Config) {
 
   console.log(`Using ${config.provider || 'ollama'} provider`)
 
-  const translators = new Map<string, Translator>()
-  for (const targetLang of config.targetLangs) {
-    translators.set(
-      targetLang,
+  const translators = new Map(
+    config.targetLangs.map((lang) => [
+      lang,
       new Translator({
         model: config.model,
         temperature: config.temperature,
         sourceLang: config.sourceLang,
-        targetLang: targetLang,
+        targetLang: lang,
         provider: config.provider,
         apiKey: config.apiKey,
         llm: config.llm,
       }),
-    )
-  }
+    ]),
+  )
 
   const tasks = new Listr(
     files.map((file) => {
@@ -99,9 +92,8 @@ function getTargetPath(config: Config, filePath: string, targetLang: string): st
     const ext = extname(filePath)
     const dirPath = dirname(relativePath)
     return join(config.targetDir.replace('[lang]', targetLang), dirPath, `${targetLang}${ext}`)
-  } else {
-    return join(config.targetDir.replace('[lang]', targetLang), relativePath)
   }
+  return join(config.targetDir.replace('[lang]', targetLang), relativePath)
 }
 
 async function writeOutput(
@@ -111,11 +103,8 @@ async function writeOutput(
   targetLang: string,
 ) {
   const targetPath = getTargetPath(config, filePath, targetLang)
-
   await mkdir(dirname(targetPath), { recursive: true })
   await writeFile(targetPath, translatedContent, 'utf-8')
-
-  return relative(config.sourceDir, filePath)
 }
 
 async function translateMarkdownFile(
@@ -128,20 +117,16 @@ async function translateMarkdownFile(
   const content = await readFile(filePath, 'utf-8')
   const tree = await parseMarkdown(content)
   const chunks = await getTranslatableChunks(tree)
-  const relativePath = relative(config.sourceDir, filePath)
 
-  task.title = `${relativePath} (${chunks.length} chunks)`
+  task.title = `${targetLang}: ${chunks.length} chunks`
 
   const translatedTree: Root = JSON.parse(JSON.stringify(tree))
 
   const translatedChunks = await Promise.all(
-    chunks.map(async (chunk) => {
-      const translatedText = await translator.translateChunk(chunk)
-      return {
-        ...chunk,
-        text: translatedText,
-      }
-    }),
+    chunks.map(async (chunk) => ({
+      ...chunk,
+      text: await translator.translateChunk(chunk),
+    })),
   )
 
   for (const translatedChunk of translatedChunks) {
@@ -165,23 +150,44 @@ async function translateMarkdownFile(
   await writeOutput(config, filePath, translatedContent, targetLang)
 }
 
-function hasGroupChanged(
-  sourceGroup: TranslatableGroup,
-  existingGroups: TranslatableGroup[],
+interface BaseGroup {
+  groupKey: string
+  strings: Array<{ value: string }>
+}
+
+function hasGroupChanged<T extends BaseGroup>(
+  sourceGroup: T,
+  existingGroups: T[],
+  getKey: (str: T['strings'][number]) => string,
 ): boolean {
   const existingGroup = existingGroups.find((g) => g.groupKey === sourceGroup.groupKey)
   if (!existingGroup) return true
-
   if (sourceGroup.strings.length !== existingGroup.strings.length) return true
 
   for (const sourceString of sourceGroup.strings) {
-    const existingString = existingGroup.strings.find(
-      (s) => s.path.join('.') === sourceString.path.join('.'),
-    )
-    if (!existingString) return true
+    const sourceKey = getKey(sourceString)
+    if (!existingGroup.strings.find((s) => getKey(s) === sourceKey)) return true
   }
 
   return false
+}
+
+function updateTaskTitle<T extends BaseGroup>(
+  task: any,
+  targetLang: string,
+  groups: T[],
+  changedGroups: T[],
+  unchangedGroups: T[],
+) {
+  if (changedGroups.length === 0) {
+    task.skip(`${targetLang}: ${groups.length}/${groups.length} groups unchanged`)
+    return false
+  }
+
+  task.title =
+    `${targetLang}: translating ${changedGroups.length}/${groups.length} groups` +
+    (unchangedGroups.length > 0 ? `, ${unchangedGroups.length}/${groups.length} groups unchanged` : '')
+  return true
 }
 
 async function translateJSONFile(
@@ -196,7 +202,7 @@ async function translateJSONFile(
   const groups = await extractTranslatableGroups(jsonData)
 
   const targetPath = getTargetPath(config, filePath, targetLang)
-  let existingTranslations: Map<string, string> = new Map()
+  const existingTranslations = new Map<string, string>()
   let existingGroups: TranslatableGroup[] = []
 
   if (existsSync(targetPath)) {
@@ -215,35 +221,28 @@ async function translateJSONFile(
     }
   }
 
-  const changedGroups = groups.filter((g) => hasGroupChanged(g, existingGroups))
-  const unchangedGroups = groups.filter((g) => !hasGroupChanged(g, existingGroups))
+  const getKey = (str: { path: string[] }) => str.path.join('.')
+  const changedGroups = groups.filter((g) => hasGroupChanged(g, existingGroups, getKey))
+  const unchangedGroups = groups.filter((g) => !hasGroupChanged(g, existingGroups, getKey))
 
-  if (changedGroups.length === 0) {
-    task.skip(`${targetLang}: ${groups.length}/${groups.length} groups unchanged`)
-    return
-  }
-
-  task.title =
-    `${targetLang}: translating ${changedGroups.length}/${groups.length} groups` +
-    (unchangedGroups.length > 0 ? `, ${unchangedGroups.length}/${groups.length} groups unchanged` : '')
+  if (!updateTaskTitle(task, targetLang, groups, changedGroups, unchangedGroups)) return
 
   const allTranslatedStrings: Array<{ path: string[]; value: string }> = []
 
   for (const group of unchangedGroups) {
     for (const str of group.strings) {
-      const existingValue = existingTranslations.get(str.path.join('.'))
       allTranslatedStrings.push({
         path: str.path,
-        value: existingValue ?? str.value,
+        value: existingTranslations.get(str.path.join('.')) ?? str.value,
       })
     }
   }
 
   await Promise.all(
     changedGroups.map(async (group) => {
-      const groupStrings = group.strings.map(({ path, value }) => ({
-        key: path.join('.'),
-        value,
+      const groupStrings = group.strings.map((str) => ({
+        key: str.path.join('.'),
+        value: str.value,
       }))
 
       const translatedGroupStrings = await translator.translateGroup(group.groupKey, groupStrings)
@@ -262,27 +261,6 @@ async function translateJSONFile(
   await writeOutput(config, filePath, translatedContent, targetLang)
 }
 
-function hasJSGroupChanged(
-  sourceGroup: TranslatableJSGroup,
-  existingGroups: TranslatableJSGroup[],
-): boolean {
-  const existingGroup = existingGroups.find((g) => g.groupKey === sourceGroup.groupKey)
-  if (!existingGroup) return true
-
-  if (sourceGroup.strings.length !== existingGroup.strings.length) return true
-
-  for (const sourceString of sourceGroup.strings) {
-    const sourceKey = sourceString.objectPath.join('.') || sourceString.path
-    const existingString = existingGroup.strings.find((s) => {
-      const existingKey = s.objectPath.join('.') || s.path
-      return existingKey === sourceKey
-    })
-    if (!existingString) return true
-  }
-
-  return false
-}
-
 async function translateJSFile(
   filePath: string,
   config: Config,
@@ -296,7 +274,7 @@ async function translateJSFile(
   const groups = await extractTranslatableGroupsJS(ast)
 
   const targetPath = getTargetPath(config, filePath, targetLang)
-  let existingTranslations: Map<string, string> = new Map()
+  const existingTranslations = new Map<string, string>()
   let existingGroups: TranslatableJSGroup[] = []
 
   if (existsSync(targetPath)) {
@@ -307,8 +285,7 @@ async function translateJSFile(
 
       for (const group of existingGroups) {
         for (const str of group.strings) {
-          const key = str.objectPath.join('.') || str.path
-          existingTranslations.set(key, str.value)
+          existingTranslations.set(str.objectPath.join('.') || str.path, str.value)
         }
       }
     } catch {
@@ -316,36 +293,29 @@ async function translateJSFile(
     }
   }
 
-  const changedGroups = groups.filter((g) => hasJSGroupChanged(g, existingGroups))
-  const unchangedGroups = groups.filter((g) => !hasJSGroupChanged(g, existingGroups))
+  const getKey = (str: { path: string; objectPath: string[] }) => str.objectPath.join('.') || str.path
+  const changedGroups = groups.filter((g) => hasGroupChanged(g, existingGroups, getKey))
+  const unchangedGroups = groups.filter((g) => !hasGroupChanged(g, existingGroups, getKey))
 
-  if (changedGroups.length === 0) {
-    task.skip(`${targetLang}: ${groups.length}/${groups.length} groups unchanged`)
-    return
-  }
-
-  task.title =
-    `${targetLang}: translating ${changedGroups.length}/${groups.length} groups` +
-    (unchangedGroups.length > 0 ? `, ${unchangedGroups.length}/${groups.length} groups unchanged` : '')
+  if (!updateTaskTitle(task, targetLang, groups, changedGroups, unchangedGroups)) return
 
   const allTranslatedStrings: Array<{ path: string; value: string }> = []
 
   for (const group of unchangedGroups) {
     for (const str of group.strings) {
       const key = str.objectPath.join('.') || str.path
-      const existingValue = existingTranslations.get(key)
       allTranslatedStrings.push({
         path: str.path,
-        value: existingValue ?? str.value,
+        value: existingTranslations.get(key) ?? str.value,
       })
     }
   }
 
   await Promise.all(
     changedGroups.map(async (group) => {
-      const groupStrings = group.strings.map(({ path, objectPath, value }) => ({
-        key: objectPath.length > 0 ? objectPath.join('.') : path,
-        value,
+      const groupStrings = group.strings.map((str) => ({
+        key: str.objectPath.length > 0 ? str.objectPath.join('.') : str.path,
+        value: str.value,
       }))
 
       const translatedGroupStrings = await translator.translateGroup(group.groupKey, groupStrings)
