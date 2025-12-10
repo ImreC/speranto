@@ -18,100 +18,135 @@ import {
   type TranslatableJSGroup,
 } from './parsers/js'
 import { Translator } from './translator'
-import type { Config } from './types'
+import { translateDatabaseTasks } from './translate-database'
+import type { Config, FileConfig } from './types'
 import type { Root, BlockContent } from 'mdast'
 
+interface FileTranslateConfig extends Config {
+  files: FileConfig
+}
+
 export async function translate(config: Config) {
-  const extensions = ['md', 'json', 'js', 'ts']
-  const patterns = extensions.map((ext) =>
-    config.useLangCodeAsFilename
-      ? join(config.sourceDir, `**/${config.sourceLang}.${ext}`)
-      : join(config.sourceDir, `**/*.${ext}`),
-  )
+  const tasks: Array<{ title: string; task: () => Listr }> = []
 
-  const allFiles = await Promise.all(patterns.map((pattern) => glob(pattern)))
-  const files = allFiles.flat()
+  if (config.files) {
+    tasks.push({
+      title: 'Files',
+      task: () => translateFiles(config as FileTranslateConfig),
+    })
+  }
 
-  if (files.length === 0) {
-    console.log('No files found to translate.')
+  if (config.database) {
+    tasks.push({
+      title: 'Database',
+      task: () => translateDatabaseTasks(config),
+    })
+  }
+
+  if (tasks.length === 0) {
+    console.log('No translation sources configured. Add "files" or "database" to your config.')
     return
   }
 
   console.log(`Using ${config.provider || 'ollama'} provider`)
 
-  const translators = new Map(
-    config.targetLangs.map((lang) => [
-      lang,
-      new Translator({
-        model: config.model,
-        temperature: config.temperature,
-        sourceLang: config.sourceLang,
-        targetLang: lang,
-        provider: config.provider,
-        apiKey: config.apiKey,
-        llm: config.llm,
-      }),
-    ]),
-  )
+  const listr = new Listr(tasks, {
+    concurrent: true,
+    renderer: config.verbose ? 'verbose' : 'default',
+  } as any)
 
-  const tasks = new Listr(
-    files.map((file) => {
-      const ext = extname(file)
-      const relativePath = relative(config.sourceDir, file)
-
-      return {
-        title: relativePath,
-        task: (_ctx, task) =>
-          task.newListr(
-            config.targetLangs.map((targetLang) => ({
-              title: targetLang,
-              task: async (_ctx, langTask) => {
-                const translator = translators.get(targetLang)!
-                if (ext === '.md') {
-                  return translateMarkdownFile(file, config, targetLang, translator, langTask)
-                } else if (ext === '.json') {
-                  return translateJSONFile(file, config, targetLang, translator, langTask)
-                } else if (ext === '.js' || ext === '.ts') {
-                  return translateJSFile(
-                    file,
-                    config,
-                    targetLang,
-                    translator,
-                    ext === '.ts',
-                    langTask,
-                  )
-                }
-              },
-            })),
-            { concurrent: true },
-          ),
-      }
-    }),
-    {
-      concurrent: false,
-      renderer: config.verbose ? 'verbose' : 'default',
-      rendererOptions: {
-        showErrorMessage: true,
-        collapseErrors: false,
-      },
-    },
-  )
-
-  await tasks.run()
+  await listr.run()
 }
 
-function getTargetPath(config: Config, filePath: string, targetLang: string): string {
-  const relativePath = relative(config.sourceDir, filePath)
-  if (config.useLangCodeAsFilename) {
+function translateFiles(config: FileTranslateConfig): Listr {
+  const { files } = config
+  const extensions = ['md', 'json', 'js', 'ts']
+
+  return new Listr([
+    {
+      title: 'Scanning files',
+      task: async (ctx) => {
+        const patterns = extensions.map((ext) =>
+          files.useLangCodeAsFilename
+            ? join(files.sourceDir, `**/${config.sourceLang}.${ext}`)
+            : join(files.sourceDir, `**/*.${ext}`),
+        )
+        const allFiles = await Promise.all(patterns.map((pattern) => glob(pattern)))
+        ctx.fileList = allFiles.flat()
+      },
+    },
+    {
+      title: 'Translating files',
+      skip: (ctx) => ctx.fileList.length === 0 && 'No files found',
+      task: (ctx, task) => {
+        const translators = new Map(
+          config.targetLangs.map((lang) => [
+            lang,
+            new Translator({
+              model: config.model,
+              temperature: config.temperature,
+              sourceLang: config.sourceLang,
+              targetLang: lang,
+              provider: config.provider,
+              apiKey: config.apiKey,
+              llm: config.llm,
+            }),
+          ]),
+        )
+
+        return task.newListr(
+          ctx.fileList.map((file: string) => {
+            const ext = extname(file)
+            const relativePath = relative(files.sourceDir, file)
+
+            return {
+              title: relativePath,
+              task: (_ctx: unknown, fileTask: any) =>
+                fileTask.newListr(
+                  config.targetLangs.map((targetLang) => ({
+                    title: targetLang,
+                    task: async (_ctx: unknown, langTask: any) => {
+                      const translator = translators.get(targetLang)!
+                      if (ext === '.md') {
+                        return translateMarkdownFile(file, config, targetLang, translator, langTask)
+                      } else if (ext === '.json') {
+                        return translateJSONFile(file, config, targetLang, translator, langTask)
+                      } else if (ext === '.js' || ext === '.ts') {
+                        return translateJSFile(
+                          file,
+                          config,
+                          targetLang,
+                          translator,
+                          ext === '.ts',
+                          langTask,
+                        )
+                      }
+                    },
+                  })),
+                  { concurrent: true },
+                ),
+            }
+          }),
+          { concurrent: false },
+        )
+      },
+    },
+  ])
+}
+
+function getTargetPath(config: FileTranslateConfig, filePath: string, targetLang: string): string {
+  const { files } = config
+  const relativePath = relative(files.sourceDir, filePath)
+  if (files.useLangCodeAsFilename) {
     const ext = extname(filePath)
     const dirPath = dirname(relativePath)
-    return join(config.targetDir.replace('[lang]', targetLang), dirPath, `${targetLang}${ext}`)
+    return join(files.targetDir.replace('[lang]', targetLang), dirPath, `${targetLang}${ext}`)
   }
-  return join(config.targetDir.replace('[lang]', targetLang), relativePath)
+  return join(files.targetDir.replace('[lang]', targetLang), relativePath)
 }
 
 async function writeOutput(
-  config: Config,
+  config: FileTranslateConfig,
   filePath: string,
   translatedContent: string,
   targetLang: string,
@@ -123,7 +158,7 @@ async function writeOutput(
 
 async function translateMarkdownFile(
   filePath: string,
-  config: Config,
+  config: FileTranslateConfig,
   targetLang: string,
   translator: Translator,
   task: any,
@@ -208,7 +243,7 @@ function updateTaskTitle<T extends BaseGroup>(
 
 async function translateJSONFile(
   filePath: string,
-  config: Config,
+  config: FileTranslateConfig,
   targetLang: string,
   translator: Translator,
   task: any,
@@ -260,7 +295,7 @@ async function translateJSONFile(
     [
       {
         title: `Translating ${changedGroups.length} groups`,
-        task: (_, groupsTask) =>
+        task: (_: unknown, groupsTask: any) =>
           groupsTask.newListr(
             changedGroups.map((group) => ({
               title: `"${group.groupKey}" (${group.strings.length} strings)`,
@@ -311,7 +346,7 @@ async function translateJSONFile(
 
 async function translateJSFile(
   filePath: string,
-  config: Config,
+  config: FileTranslateConfig,
   targetLang: string,
   translator: Translator,
   isTypeScript: boolean,
@@ -366,7 +401,7 @@ async function translateJSFile(
     [
       {
         title: `Translating ${changedGroups.length} groups`,
-        task: (_, groupsTask) =>
+        task: (_: unknown, groupsTask: any) =>
           groupsTask.newListr(
             changedGroups.map((group) => ({
               title: `"${group.groupKey}" (${group.strings.length} strings)`,

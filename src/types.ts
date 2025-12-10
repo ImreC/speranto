@@ -1,19 +1,5 @@
 import type { LLMInterface } from './interface'
 
-export interface Config {
-  model: string
-  temperature: number
-  sourceLang: string
-  targetLangs: string[]
-  sourceDir: string
-  targetDir: string
-  provider: 'openai' | 'ollama' | 'mistral'
-  useLangCodeAsFilename?: boolean
-  apiKey?: string
-  llm?: LLMInterface
-  verbose?: boolean
-}
-
 export interface TableConfig {
   name: string
   columns: string[]
@@ -27,12 +13,21 @@ export interface DatabaseConfig {
   translationTableSuffix?: string
 }
 
-export interface DatabaseTranslationConfig {
+export interface FileConfig {
+  sourceDir: string
+  targetDir: string
+  useLangCodeAsFilename?: boolean
+}
+
+export interface Config {
   model: string
   temperature: number
   sourceLang: string
   targetLangs: string[]
   provider: 'openai' | 'ollama' | 'mistral'
   apiKey?: string
-  database: DatabaseConfig
+  llm?: LLMInterface
+  verbose?: boolean
+  files?: FileConfig
+  database?: DatabaseConfig
 }

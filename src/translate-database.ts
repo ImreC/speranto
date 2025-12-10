@@ -1,107 +1,137 @@
+import { Listr } from 'listr2'
 import { Translator } from './translator'
 import { createDatabaseAdapter, type TranslationRow } from './database'
-import type { DatabaseTranslationConfig, TableConfig } from './types'
+import type { Config, TableConfig } from './types'
 
-export async function translateDatabase(config: DatabaseTranslationConfig) {
-  const suffix = config.database.translationTableSuffix || '_translations'
-  const adapter = createDatabaseAdapter(config.database)
+interface DatabaseConfig extends Config {
+  database: NonNullable<Config['database']>
+}
 
-  try {
-    await adapter.connect()
-    console.log(`Connected to ${config.database.type} database`)
-
-    for (const table of config.database.tables) {
-      await ensureTranslationTableExists(adapter, table, suffix)
-    }
-
-    for (const targetLang of config.targetLangs) {
-      console.log(`\nTranslating to ${targetLang}...`)
-
-      const translator = new Translator({
-        model: config.model,
-        temperature: config.temperature,
-        sourceLang: config.sourceLang,
-        targetLang: targetLang,
-        provider: config.provider,
-        apiKey: config.apiKey,
-      })
-
-      for (const table of config.database.tables) {
-        await translateTable(adapter, table, targetLang, translator, suffix)
-      }
-    }
-
-    console.log('\nDatabase translation complete!')
-  } finally {
-    await adapter.close()
+export function translateDatabaseTasks(config: Config): Listr {
+  if (!config.database) {
+    return new Listr([{ title: 'No database configured', task: () => {} }])
   }
+
+  const dbConfig = config as DatabaseConfig
+  const suffix = dbConfig.database.translationTableSuffix || '_translations'
+  const adapter = createDatabaseAdapter(dbConfig.database)
+
+  return new Listr(
+    [
+      {
+        title: 'Connect to database',
+        task: async () => {
+          await adapter.connect()
+        },
+      },
+      {
+        title: 'Ensure translation tables',
+        task: () =>
+          new Listr(
+            dbConfig.database.tables.map((table) => ({
+              title: table.name,
+              task: async () => {
+                const idColumn = table.idColumn || 'id'
+                await adapter.ensureTranslationTable(table.name, table.columns, idColumn, suffix)
+              },
+            })),
+            { concurrent: true },
+          ),
+      },
+      {
+        title: 'Translate tables',
+        task: () =>
+          new Listr(
+            dbConfig.targetLangs.map((targetLang) => ({
+              title: targetLang,
+              task: () => {
+                const translator = new Translator({
+                  model: dbConfig.model,
+                  temperature: dbConfig.temperature,
+                  sourceLang: dbConfig.sourceLang,
+                  targetLang: targetLang,
+                  provider: dbConfig.provider,
+                  apiKey: dbConfig.apiKey,
+                })
+
+                return new Listr(
+                  dbConfig.database.tables.map((table) => ({
+                    title: table.name,
+                    task: (_ctx, task) =>
+                      translateTableTask(adapter, table, targetLang, translator, suffix, task),
+                  })),
+                  { concurrent: false },
+                )
+              },
+            })),
+            { concurrent: true },
+          ),
+      },
+      {
+        title: 'Close connection',
+        task: async () => {
+          await adapter.close()
+        },
+      },
+    ],
+    { concurrent: false },
+  )
 }
 
-async function ensureTranslationTableExists(
-  adapter: ReturnType<typeof createDatabaseAdapter>,
-  table: TableConfig,
-  suffix: string,
-) {
-  const idColumn = table.idColumn || 'id'
-  await adapter.ensureTranslationTable(table.name, table.columns, idColumn, suffix)
-
-  const translationTableName = adapter.getTranslationTableName(table.name, suffix)
-  console.log(`Ensured translation table exists: ${translationTableName}`)
-}
-
-async function translateTable(
+async function translateTableTask(
   adapter: ReturnType<typeof createDatabaseAdapter>,
   table: TableConfig,
   targetLang: string,
   translator: Translator,
   suffix: string,
-) {
-  console.log(`\nProcessing table: ${table.name}`)
-
+  task: any,
+): Promise<Listr> {
   const sourceRows = await adapter.getSourceRows(table)
-  console.log(`Found ${sourceRows.length} rows to translate`)
 
-  let translatedCount = 0
+  const rowsToTranslate: typeof sourceRows = []
   let skippedCount = 0
 
   for (const row of sourceRows) {
     const existing = await adapter.getExistingTranslation(table.name, row.id, targetLang, suffix)
-
     if (existing) {
       skippedCount++
-      continue
+    } else {
+      rowsToTranslate.push(row)
     }
-
-    const translatedColumns: Record<string, string> = {}
-
-    for (const [column, value] of Object.entries(row.columns)) {
-      if (!value || !value.trim()) {
-        translatedColumns[column] = value || ''
-        continue
-      }
-
-      try {
-        const translated = await translator.translateText(value)
-        translatedColumns[column] = translated
-      } catch (error) {
-        console.error(`Error translating ${table.name}.${column} for row ${row.id}:`, error)
-        translatedColumns[column] = value
-      }
-    }
-
-    const translation: TranslationRow = {
-      sourceId: row.id,
-      lang: targetLang,
-      columns: translatedColumns,
-    }
-
-    await adapter.upsertTranslation(table.name, translation, suffix)
-    translatedCount++
-
-    console.log(`Translated row ${row.id} -> ${targetLang}`)
   }
 
-  console.log(
-    `Table ${table.name}: ${translatedCount} translated, ${skippedCount} skipped (already exist)`,
+  if (rowsToTranslate.length === 0) {
+    task.skip(`${skippedCount} rows already translated`)
+    return new Listr([])
+  }
+
+  task.title = `${table.name} (${rowsToTranslate.length} rows, ${skippedCount} skipped)`
+
+  return new Listr(
+    rowsToTranslate.map((row) => ({
+      title: `Row ${row.id}`,
+      task: async () => {
+        const translatedColumns: Record<string, string> = {}
+
+        for (const [column, value] of Object.entries(row.columns)) {
+          if (!value || !value.trim()) {
+            translatedColumns[column] = value || ''
+            continue
+          }
+
+          const translated = await translator.translateText(value)
+          translatedColumns[column] = translated
+        }
+
+        const translation: TranslationRow = {
+          sourceId: row.id,
+          lang: targetLang,
+          columns: translatedColumns,
+        }
+
+        await adapter.upsertTranslation(table.name, translation, suffix)
+      },
+    })),
+    { concurrent: false },
   )
 }

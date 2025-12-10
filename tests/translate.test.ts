@@ -44,11 +44,12 @@ test('translate should handle JSON files with single target language', async () 
     temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['es'],
-    sourceDir,
-    targetDir: join(targetDir, '[lang]'),
     provider: 'mistral',
-    useLangCodeAsFilename: false,
     llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
   }
 
   await translate(config)
@@ -73,10 +74,12 @@ test('translate should handle multiple target languages', async () => {
     temperature: 0.5,
     sourceLang: 'en',
     targetLangs: ['es', 'fr', 'de'],
-    sourceDir,
-    targetDir: join(targetDir, '[lang]'),
     provider: 'mistral',
     llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
   }
 
   await translate(config)
@@ -94,16 +97,18 @@ test('translate should use language code as filename when configured', async () 
     temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['es'],
-    sourceDir,
-    targetDir,
     provider: 'mistral',
-    useLangCodeAsFilename: true,
     llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir,
+      useLangCodeAsFilename: true,
+    },
   }
 
   await translate(config)
 
-  expect(config.useLangCodeAsFilename).toBe(true)
+  expect(config.files!.useLangCodeAsFilename).toBe(true)
 })
 
 test('translate should handle JavaScript files', async () => {
@@ -122,10 +127,12 @@ const config = {
     temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['fr'],
-    sourceDir,
-    targetDir: join(targetDir, '[lang]'),
     provider: 'mistral',
     llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
   }
 
   await translate(config)
@@ -154,10 +161,12 @@ const config: Config = {
     temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['de'],
-    sourceDir,
-    targetDir: join(targetDir, '[lang]'),
     provider: 'mistral',
     llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
   }
 
   await translate(config)
@@ -180,10 +189,12 @@ test('translate should find files in nested directories', async () => {
     temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['es'],
-    sourceDir,
-    targetDir: join(targetDir, '[lang]'),
     provider: 'mistral',
     llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
   }
 
   await translate(config)
@@ -238,10 +249,12 @@ test('translate should skip unchanged JSON groups and reuse existing translation
     temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['es'],
-    sourceDir,
-    targetDir: join(targetDir, '[lang]'),
     provider: 'mistral',
     llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
   }
 
   await translate(config)
@@ -296,10 +309,12 @@ test('translate should retranslate groups with new keys', async () => {
     temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['es'],
-    sourceDir,
-    targetDir: join(targetDir, '[lang]'),
     provider: 'mistral',
     llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
   }
 
   await translate(config)

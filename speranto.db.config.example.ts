@@ -1,6 +1,6 @@
-import type { DatabaseTranslationConfig } from './src/types'
+import type { Config } from './src/types'
 
-const config: DatabaseTranslationConfig = {
+const config: Config = {
   model: 'gpt-4o-mini',
   temperature: 0.0,
   sourceLang: 'en',

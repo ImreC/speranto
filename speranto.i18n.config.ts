@@ -5,11 +5,13 @@ const config: Config = {
   temperature: 0.0,
   sourceLang: 'en',
   targetLangs: ['nl'],
-  sourceDir: './example_content/i18n',
-  targetDir: './example_content/i18n',
   provider: 'mistral',
-  useLangCodeAsFilename: true,
   apiKey: process.env.MISTRAL_API_KEY,
+  files: {
+    sourceDir: './example_content/i18n',
+    targetDir: './example_content/i18n',
+    useLangCodeAsFilename: true,
+  },
 }
 
 export default config
