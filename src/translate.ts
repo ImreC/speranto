@@ -52,10 +52,17 @@ export async function translate(config: Config) {
 
   const listr = new Listr(tasks, {
     concurrent: true,
-    renderer: config.verbose ? 'verbose' : 'default',
+    renderer: 'default',
+    rendererOptions: {
+      collapseSubtasks: false,
+      collapseSkips: false,
+      suffixSkips: true,
+    },
   } as any)
 
   await listr.run()
+
+  console.log('Translation complete!')
 }
 
 function translateFiles(config: FileTranslateConfig): Listr {
@@ -127,7 +134,7 @@ function translateFiles(config: FileTranslateConfig): Listr {
                 ),
             }
           }),
-          { concurrent: false },
+          { concurrent: true },
         )
       },
     },
@@ -289,7 +296,7 @@ async function translateJSONFile(
     }
   }
 
-  const errors: Array<{ group: string; error: string }> = []
+  let hasErrors = false
 
   return task.newListr(
     [
@@ -318,12 +325,7 @@ async function translateJSONFile(
                     })
                   }
                 } catch (err) {
-                  const message = err instanceof Error ? err.message : String(err)
-                  errors.push({ group: group.groupKey, error: message })
-                  // Keep original strings on error
-                  for (const str of group.strings) {
-                    allTranslatedStrings.push({ path: str.path, value: str.value })
-                  }
+                  hasErrors = true
                   throw err
                 }
               },
@@ -333,6 +335,7 @@ async function translateJSONFile(
       },
       {
         title: 'Writing output',
+        skip: () => hasErrors && 'Skipped due to translation errors',
         task: async () => {
           const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
           const translatedContent = await stringifyJSON(translatedJSON)
@@ -395,7 +398,7 @@ async function translateJSFile(
     }
   }
 
-  const errors: Array<{ group: string; error: string }> = []
+  let hasErrors = false
 
   return task.newListr(
     [
@@ -424,12 +427,7 @@ async function translateJSFile(
                     })
                   }
                 } catch (err) {
-                  const message = err instanceof Error ? err.message : String(err)
-                  errors.push({ group: group.groupKey, error: message })
-                  // Keep original strings on error
-                  for (const str of group.strings) {
-                    allTranslatedStrings.push({ path: str.path, value: str.value })
-                  }
+                  hasErrors = true
                   throw err
                 }
               },
@@ -439,6 +437,7 @@ async function translateJSFile(
       },
       {
         title: 'Writing output',
+        skip: () => hasErrors && 'Skipped due to translation errors',
         task: async () => {
           const translatedContent = await reconstructJS(ast, allTranslatedStrings)
           await writeOutput(config, filePath, translatedContent, targetLang)
