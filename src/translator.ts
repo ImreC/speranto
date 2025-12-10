@@ -81,40 +81,26 @@ export class Translator {
 
   async translateText(text: string): Promise<string> {
     if (!text.trim()) return text
-    console.log('Awaiting model to be ready')
     await this.isModelReady
-    console.log('Model ready. Starting translation')
 
-    try {
-      const response = await this.llm.generate(this.constructPrompt(text), {
-        temperature: this.options.temperature,
-      })
-      console.log(`Translated to ${this.options.targetLang}`)
-      return response.content
-    } catch (error) {
-      console.error(`Translation error for text: "${text}"`, error)
-      throw error
-    }
+    const response = await this.llm.generate(this.constructPrompt(text), {
+      temperature: this.options.temperature,
+    })
+    return response.content
   }
 
   async translateChunk(chunk: TranslatableChunk): Promise<string> {
     if (!chunk.text.trim()) return chunk.text
-    console.log(`Translating chunk with context: ${chunk.context || 'text'}`)
     await this.isModelReady
 
-    try {
-      const response = await this.llm.generate(
-        this.constructPrompt(chunk.text, chunk.context),
-        {
-          temperature: this.options.temperature,
-        },
-      )
+    const response = await this.llm.generate(
+      this.constructPrompt(chunk.text, chunk.context),
+      {
+        temperature: this.options.temperature,
+      },
+    )
 
-      return response.content
-    } catch (error) {
-      console.error(`Translation error for chunk with context "${chunk.context}":`, error)
-      throw error
-    }
+    return response.content
   }
 
   async translateGroup(

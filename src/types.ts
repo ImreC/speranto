@@ -11,6 +11,7 @@ export interface DatabaseConfig {
   connection: string
   tables: TableConfig[]
   translationTableSuffix?: string
+  concurrency?: number
 }
 
 export interface FileConfig {
