@@ -11,6 +11,7 @@ export interface Config {
   useLangCodeAsFilename?: boolean
   apiKey?: string
   llm?: LLMInterface
+  verbose?: boolean
 }
 
 export interface TableConfig {

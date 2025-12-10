@@ -45,6 +45,7 @@ program
     false,
   )
   .option('-k, --api-key <key>', 'API key for LLM provider')
+  .option('-v, --verbose', 'Enable verbose output for debugging')
   .option('--as-config', 'Write current options to config file and exit')
   .action(async (options) => {
     if (options.asConfig) {
@@ -97,6 +98,7 @@ export default ${JSON.stringify(config, null, 2)} satisfies Partial<Config>
           provider: options.provider as 'openai' | 'ollama' | 'mistral',
           useLangCodeAsFilename: options.useLangCodeAsFilename,
           apiKey: options.apiKey,
+          verbose: options.verbose || false,
         },
         passedConfig,
       )

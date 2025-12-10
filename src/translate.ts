@@ -72,7 +72,14 @@ export async function translate(config: Config) {
                 } else if (ext === '.json') {
                   return translateJSONFile(file, config, targetLang, translator, langTask)
                 } else if (ext === '.js' || ext === '.ts') {
-                  return translateJSFile(file, config, targetLang, translator, ext === '.ts', langTask)
+                  return translateJSFile(
+                    file,
+                    config,
+                    targetLang,
+                    translator,
+                    ext === '.ts',
+                    langTask,
+                  )
                 }
               },
             })),
@@ -80,7 +87,14 @@ export async function translate(config: Config) {
           ),
       }
     }),
-    { concurrent: false },
+    {
+      concurrent: false,
+      renderer: config.verbose ? 'verbose' : 'default',
+      rendererOptions: {
+        showErrorMessage: true,
+        collapseErrors: false,
+      },
+    },
   )
 
   await tasks.run()
@@ -186,7 +200,9 @@ function updateTaskTitle<T extends BaseGroup>(
 
   task.title =
     `${targetLang}: translating ${changedGroups.length}/${groups.length} groups` +
-    (unchangedGroups.length > 0 ? `, ${unchangedGroups.length}/${groups.length} groups unchanged` : '')
+    (unchangedGroups.length > 0
+      ? `, ${unchangedGroups.length}/${groups.length} groups unchanged. Skipping...`
+      : '')
   return true
 }
 
@@ -238,27 +254,59 @@ async function translateJSONFile(
     }
   }
 
-  await Promise.all(
-    changedGroups.map(async (group) => {
-      const groupStrings = group.strings.map((str) => ({
-        key: str.path.join('.'),
-        value: str.value,
-      }))
+  const errors: Array<{ group: string; error: string }> = []
 
-      const translatedGroupStrings = await translator.translateGroup(group.groupKey, groupStrings)
+  return task.newListr(
+    [
+      {
+        title: `Translating ${changedGroups.length} groups`,
+        task: (_, groupsTask) =>
+          groupsTask.newListr(
+            changedGroups.map((group) => ({
+              title: `"${group.groupKey}" (${group.strings.length} strings)`,
+              task: async () => {
+                const groupStrings = group.strings.map((str) => ({
+                  key: str.path.join('.'),
+                  value: str.value,
+                }))
 
-      for (let i = 0; i < group.strings.length; i++) {
-        allTranslatedStrings.push({
-          path: group.strings[i]!.path,
-          value: translatedGroupStrings[i]!.value,
-        })
-      }
-    }),
+                try {
+                  const translatedGroupStrings = await translator.translateGroup(
+                    group.groupKey,
+                    groupStrings,
+                  )
+
+                  for (let i = 0; i < group.strings.length; i++) {
+                    allTranslatedStrings.push({
+                      path: group.strings[i]!.path,
+                      value: translatedGroupStrings[i]!.value,
+                    })
+                  }
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err)
+                  errors.push({ group: group.groupKey, error: message })
+                  // Keep original strings on error
+                  for (const str of group.strings) {
+                    allTranslatedStrings.push({ path: str.path, value: str.value })
+                  }
+                  throw err
+                }
+              },
+            })),
+            { concurrent: true, exitOnError: false },
+          ),
+      },
+      {
+        title: 'Writing output',
+        task: async () => {
+          const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
+          const translatedContent = await stringifyJSON(translatedJSON)
+          await writeOutput(config, filePath, translatedContent, targetLang)
+        },
+      },
+    ],
+    { concurrent: false },
   )
-
-  const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
-  const translatedContent = await stringifyJSON(translatedJSON)
-  await writeOutput(config, filePath, translatedContent, targetLang)
 }
 
 async function translateJSFile(
@@ -293,7 +341,8 @@ async function translateJSFile(
     }
   }
 
-  const getKey = (str: { path: string; objectPath: string[] }) => str.objectPath.join('.') || str.path
+  const getKey = (str: { path: string; objectPath: string[] }) =>
+    str.objectPath.join('.') || str.path
   const changedGroups = groups.filter((g) => hasGroupChanged(g, existingGroups, getKey))
   const unchangedGroups = groups.filter((g) => !hasGroupChanged(g, existingGroups, getKey))
 
@@ -311,24 +360,56 @@ async function translateJSFile(
     }
   }
 
-  await Promise.all(
-    changedGroups.map(async (group) => {
-      const groupStrings = group.strings.map((str) => ({
-        key: str.objectPath.length > 0 ? str.objectPath.join('.') : str.path,
-        value: str.value,
-      }))
+  const errors: Array<{ group: string; error: string }> = []
 
-      const translatedGroupStrings = await translator.translateGroup(group.groupKey, groupStrings)
+  return task.newListr(
+    [
+      {
+        title: `Translating ${changedGroups.length} groups`,
+        task: (_, groupsTask) =>
+          groupsTask.newListr(
+            changedGroups.map((group) => ({
+              title: `"${group.groupKey}" (${group.strings.length} strings)`,
+              task: async () => {
+                const groupStrings = group.strings.map((str) => ({
+                  key: str.objectPath.length > 0 ? str.objectPath.join('.') : str.path,
+                  value: str.value,
+                }))
 
-      for (let i = 0; i < group.strings.length; i++) {
-        allTranslatedStrings.push({
-          path: group.strings[i]!.path,
-          value: translatedGroupStrings[i]!.value,
-        })
-      }
-    }),
+                try {
+                  const translatedGroupStrings = await translator.translateGroup(
+                    group.groupKey,
+                    groupStrings,
+                  )
+
+                  for (let i = 0; i < group.strings.length; i++) {
+                    allTranslatedStrings.push({
+                      path: group.strings[i]!.path,
+                      value: translatedGroupStrings[i]!.value,
+                    })
+                  }
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err)
+                  errors.push({ group: group.groupKey, error: message })
+                  // Keep original strings on error
+                  for (const str of group.strings) {
+                    allTranslatedStrings.push({ path: str.path, value: str.value })
+                  }
+                  throw err
+                }
+              },
+            })),
+            { concurrent: true, exitOnError: false },
+          ),
+      },
+      {
+        title: 'Writing output',
+        task: async () => {
+          const translatedContent = await reconstructJS(ast, allTranslatedStrings)
+          await writeOutput(config, filePath, translatedContent, targetLang)
+        },
+      },
+    ],
+    { concurrent: false },
   )
-
-  const translatedContent = await reconstructJS(ast, allTranslatedStrings)
-  await writeOutput(config, filePath, translatedContent, targetLang)
 }
