@@ -303,7 +303,12 @@ async function translateJSONFile(
     try {
       const existingContent = await readFile(targetPath, 'utf-8')
       const existingJSON = await parseJSON(existingContent)
-      existingGroups = await extractTranslatableGroups(existingJSON)
+      const rawExistingGroups = await extractTranslatableGroups(existingJSON)
+
+      const splitExistingGroups: SplitGroup[] = config.files.maxStringsPerGroup
+        ? splitLargeGroups(rawExistingGroups, config.files.maxStringsPerGroup)
+        : rawExistingGroups.map((group) => ({ group }))
+      existingGroups = splitExistingGroups.flatMap((sg) => sg.subgroups || [sg.group])
 
       for (const group of existingGroups) {
         for (const str of group.strings) {
@@ -442,7 +447,12 @@ async function translateJSFile(
     try {
       const existingContent = await readFile(targetPath, 'utf-8')
       const existingAST = await parseJS(existingContent, isTypeScript)
-      existingGroups = await extractTranslatableGroupsJS(existingAST)
+      const rawExistingGroups = await extractTranslatableGroupsJS(existingAST)
+
+      const splitExistingGroups: SplitJSGroup[] = config.files.maxStringsPerGroup
+        ? splitLargeGroupsJS(rawExistingGroups, config.files.maxStringsPerGroup)
+        : rawExistingGroups.map((group) => ({ group }))
+      existingGroups = splitExistingGroups.flatMap((sg) => sg.subgroups || [sg.group])
 
       for (const group of existingGroups) {
         for (const str of group.strings) {
