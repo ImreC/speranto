@@ -5,13 +5,21 @@ A quick and simple machine translation tool for i18n in webapps. Named after Esp
 ## Installation
 
 ```bash
-npm install -g @speranto/speranto
+npm install @speranto/speranto
 # or
-yarn global add @speranto/speranto
+yarn add @speranto/speranto
 # or
-pnpm add -g @speranto/speranto
+pnpm add @speranto/speranto
 # or
-bun add -g @speranto/speranto
+bun add @speranto/speranto
+```
+
+Also available on [JSR](https://jsr.io/@speranto/speranto):
+
+```bash
+npx jsr add @speranto/speranto
+# or
+deno add jsr:@speranto/speranto
 ```
 
 ## Usage

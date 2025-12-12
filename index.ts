@@ -5,6 +5,8 @@ import type { Config } from './src/types'
 import { loadConfig } from './src/util/config'
 import pkg from './package.json' assert { type: 'json' }
 
+export type { Config, FileConfig, DatabaseConfig, TableConfig } from './src/types'
+
 const program = new Command()
 
 program
