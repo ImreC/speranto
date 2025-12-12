@@ -96,42 +96,27 @@ export class SQLiteAdapter extends DatabaseAdapter {
     }))
   }
 
-  async getExistingTranslation(
+  async getTranslatedIds(
     table: TableConfig,
-    sourceId: string | number,
     lang: string,
     suffix: string,
-  ): Promise<TranslationRow | null> {
+  ): Promise<Set<string>> {
     if (!this.db) throw new Error('Database not connected')
 
     const translationTable = this.getTranslationTableName(table, suffix)
 
-    const sql = `SELECT * FROM ${translationTable} WHERE source_id = ? AND lang = ?`
-
     try {
-      const stmt = this.db.prepare(sql)
-      stmt.bind([String(sourceId), lang])
-      if (!stmt.step()) {
-        stmt.free()
-        return null
+      const stmt = this.db.prepare(`SELECT source_id FROM ${translationTable} WHERE lang = ?`)
+      stmt.bind([lang])
+      const ids = new Set<string>()
+      while (stmt.step()) {
+        const row = stmt.getAsObject() as { source_id: string }
+        ids.add(row.source_id)
       }
-      const row = stmt.getAsObject() as Record<string, unknown>
       stmt.free()
-
-      const columns: Record<string, string> = {}
-      for (const [key, value] of Object.entries(row)) {
-        if (!['id', 'source_id', 'lang', 'created_at', 'updated_at'].includes(key)) {
-          columns[key] = value as string
-        }
-      }
-
-      return {
-        sourceId: row.source_id as string | number,
-        lang: row.lang as string,
-        columns,
-      }
+      return ids
     } catch {
-      return null
+      return new Set()
     }
   }
 
@@ -158,7 +143,7 @@ export class SQLiteAdapter extends DatabaseAdapter {
     const values = [
       String(translation.sourceId),
       translation.lang,
-      ...columnNames.map((col) => translation.columns[col]),
+      ...columnNames.map((col) => translation.columns[col] ?? ''),
     ]
 
     this.db.run(sql, values)

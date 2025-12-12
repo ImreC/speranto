@@ -19,12 +19,11 @@ export abstract class DatabaseAdapter {
 
   abstract getSourceRows(table: TableConfig): Promise<SourceRow[]>
 
-  abstract getExistingTranslation(
+  abstract getTranslatedIds(
     table: TableConfig,
-    sourceId: string | number,
     lang: string,
     suffix: string,
-  ): Promise<TranslationRow | null>
+  ): Promise<Set<string>>
 
   abstract upsertTranslation(
     table: TableConfig,

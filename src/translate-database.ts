@@ -102,19 +102,13 @@ async function translateTableTask(
   concurrency: number,
   task: any,
 ): Promise<void> {
-  const sourceRows = await adapter.getSourceRows(table)
+  const [sourceRows, translatedIds] = await Promise.all([
+    adapter.getSourceRows(table),
+    adapter.getTranslatedIds(table, targetLang, suffix),
+  ])
 
-  const rowsToTranslate: typeof sourceRows = []
-  let skippedCount = 0
-
-  for (const row of sourceRows) {
-    const existing = await adapter.getExistingTranslation(table, row.id, targetLang, suffix)
-    if (existing) {
-      skippedCount++
-    } else {
-      rowsToTranslate.push(row)
-    }
-  }
+  const rowsToTranslate = sourceRows.filter((row) => !translatedIds.has(String(row.id)))
+  const skippedCount = sourceRows.length - rowsToTranslate.length
 
   if (rowsToTranslate.length === 0) {
     task.skip(`${skippedCount} rows already translated`)

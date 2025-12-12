@@ -80,40 +80,24 @@ export class PostgresAdapter extends DatabaseAdapter {
     }))
   }
 
-  async getExistingTranslation(
+  async getTranslatedIds(
     table: TableConfig,
-    sourceId: string | number,
     lang: string,
     suffix: string,
-  ): Promise<TranslationRow | null> {
+  ): Promise<Set<string>> {
     if (!this.client) throw new Error('Database not connected')
 
     const translationTable = this.getQualifiedTableName(table, suffix)
 
     try {
       const result = await this.client.query(
-        `SELECT * FROM ${translationTable} WHERE source_id = $1 AND lang = $2`,
-        [String(sourceId), lang],
+        `SELECT source_id FROM ${translationTable} WHERE lang = $1`,
+        [lang],
       )
-      const rows = result.rows as Record<string, unknown>[]
-
-      const row = rows[0]
-      if (!row) return null
-
-      const columns: Record<string, string> = {}
-      for (const [key, value] of Object.entries(row)) {
-        if (!['id', 'source_id', 'lang', 'created_at', 'updated_at'].includes(key)) {
-          columns[key] = value as string
-        }
-      }
-
-      return {
-        sourceId: row.source_id as string | number,
-        lang: row.lang as string,
-        columns,
-      }
+      const rows = result.rows as { source_id: string }[]
+      return new Set(rows.map((r) => r.source_id))
     } catch {
-      return null
+      return new Set()
     }
   }
 

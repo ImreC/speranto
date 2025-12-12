@@ -89,10 +89,9 @@ test('pg - upsertTranslation inserts new translation', async () => {
     '_translations',
   )
 
-  const existing = await adapter.getExistingTranslation(articlesTable, 1, 'es', '_translations')
-  expect(existing).not.toBeNull()
-  expect(existing?.columns.title).toBe('Hola Mundo')
-  expect(existing?.columns.body).toBe('Este es el cuerpo.')
+  const translatedIds = await adapter.getTranslatedIds(articlesTable, 'es', '_translations')
+  expect(translatedIds.has('1')).toBe(true)
+  expect(translatedIds.size).toBe(1)
 })
 
 test('pg - upsertTranslation updates existing translation', async () => {
@@ -118,14 +117,14 @@ test('pg - upsertTranslation updates existing translation', async () => {
     '_translations',
   )
 
-  const existing = await adapter.getExistingTranslation(articlesTable, 1, 'es', '_translations')
-  expect(existing?.columns.title).toBe('Hola Mundo Actualizado')
-  expect(existing?.columns.body).toBe('Cuerpo actualizado.')
+  const translatedIds = await adapter.getTranslatedIds(articlesTable, 'es', '_translations')
+  expect(translatedIds.has('1')).toBe(true)
+  expect(translatedIds.size).toBe(1)
 })
 
-test('pg - getExistingTranslation returns null for non-existent translation', async () => {
+test('pg - getTranslatedIds returns empty set for non-existent translations', async () => {
   await adapter.ensureTranslationTable(articlesTable, '_translations')
 
-  const existing = await adapter.getExistingTranslation(articlesTable, 999, 'fr', '_translations')
-  expect(existing).toBeNull()
+  const translatedIds = await adapter.getTranslatedIds(articlesTable, 'fr', '_translations')
+  expect(translatedIds.size).toBe(0)
 })
