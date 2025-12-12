@@ -25,6 +25,7 @@ program
   )
   .option('-p, --provider <provider>', 'LLM provider (openai, ollama, mistral)')
   .option('-k, --api-key <key>', 'API key for LLM provider')
+  .option('-i, --instructions-dir <path>', 'Directory containing language instruction files')
   .option('-v, --verbose', 'Enable verbose output for debugging')
   .action(async (options) => {
     const passedConfig = await loadConfig(options.config)
@@ -40,6 +41,7 @@ program
         | 'mistral',
       apiKey: options.apiKey || passedConfig.apiKey,
       verbose: options.verbose || passedConfig.verbose || false,
+      instructionsDir: options.instructionsDir || passedConfig.instructionsDir,
       files: passedConfig.files,
       database: passedConfig.database,
     }

@@ -1,8 +1,14 @@
 import { test, expect, beforeAll, beforeEach, afterAll } from 'bun:test'
 import { SQL } from 'bun'
 import { PostgresAdapter } from '../../src/database/postgres'
+import type { TableConfig } from '../../src/types'
 
 const CONNECTION_STRING = 'postgres://test:test@localhost:5432/speranto_test'
+
+const articlesTable: TableConfig = {
+  name: 'articles',
+  columns: ['title', 'body'],
+}
 
 let adapter: PostgresAdapter
 let sql: SQL
@@ -60,7 +66,7 @@ test('pg - getSourceRows returns all rows with specified columns', async () => {
 })
 
 test('pg - ensureTranslationTable creates translation table', async () => {
-  await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
+  await adapter.ensureTranslationTable(articlesTable, '_translations')
 
   const tables = await sql.unsafe(`
     SELECT table_name FROM information_schema.tables
@@ -71,10 +77,10 @@ test('pg - ensureTranslationTable creates translation table', async () => {
 })
 
 test('pg - upsertTranslation inserts new translation', async () => {
-  await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
+  await adapter.ensureTranslationTable(articlesTable, '_translations')
 
   await adapter.upsertTranslation(
-    'articles',
+    articlesTable,
     {
       sourceId: 1,
       lang: 'es',
@@ -83,17 +89,17 @@ test('pg - upsertTranslation inserts new translation', async () => {
     '_translations',
   )
 
-  const existing = await adapter.getExistingTranslation('articles', 1, 'es', '_translations')
+  const existing = await adapter.getExistingTranslation(articlesTable, 1, 'es', '_translations')
   expect(existing).not.toBeNull()
   expect(existing?.columns.title).toBe('Hola Mundo')
   expect(existing?.columns.body).toBe('Este es el cuerpo.')
 })
 
 test('pg - upsertTranslation updates existing translation', async () => {
-  await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
+  await adapter.ensureTranslationTable(articlesTable, '_translations')
 
   await adapter.upsertTranslation(
-    'articles',
+    articlesTable,
     {
       sourceId: 1,
       lang: 'es',
@@ -103,7 +109,7 @@ test('pg - upsertTranslation updates existing translation', async () => {
   )
 
   await adapter.upsertTranslation(
-    'articles',
+    articlesTable,
     {
       sourceId: 1,
       lang: 'es',
@@ -112,19 +118,14 @@ test('pg - upsertTranslation updates existing translation', async () => {
     '_translations',
   )
 
-  const existing = await adapter.getExistingTranslation('articles', 1, 'es', '_translations')
+  const existing = await adapter.getExistingTranslation(articlesTable, 1, 'es', '_translations')
   expect(existing?.columns.title).toBe('Hola Mundo Actualizado')
   expect(existing?.columns.body).toBe('Cuerpo actualizado.')
 })
 
 test('pg - getExistingTranslation returns null for non-existent translation', async () => {
-  await adapter.ensureTranslationTable('articles', ['title', 'body'], 'id', '_translations')
+  await adapter.ensureTranslationTable(articlesTable, '_translations')
 
-  const existing = await adapter.getExistingTranslation('articles', 999, 'fr', '_translations')
+  const existing = await adapter.getExistingTranslation(articlesTable, 999, 'fr', '_translations')
   expect(existing).toBeNull()
-})
-
-test('pg - getTranslationTableName returns correct name', () => {
-  const name = adapter.getTranslationTableName('articles', '_translations')
-  expect(name).toBe('articles_translations')
 })

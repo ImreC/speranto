@@ -102,6 +102,90 @@ function groupByDotNotation(
   }))
 }
 
+export interface SplitGroup {
+  group: TranslatableGroup
+  subgroups?: TranslatableGroup[]
+}
+
+export function splitLargeGroups(
+  groups: TranslatableGroup[],
+  maxStringsPerGroup: number,
+): SplitGroup[] {
+  const result: SplitGroup[] = []
+
+  for (const group of groups) {
+    if (group.strings.length <= maxStringsPerGroup) {
+      result.push({ group })
+      continue
+    }
+
+    // Try to split by next nesting level first
+    const subgroups = splitByNextLevel(group)
+
+    if (subgroups.length > 1) {
+      // Successfully split by nesting, but some subgroups might still be too large
+      const finalSubgroups: TranslatableGroup[] = []
+      for (const subgroup of subgroups) {
+        if (subgroup.strings.length <= maxStringsPerGroup) {
+          finalSubgroups.push(subgroup)
+        } else {
+          // Subgroup still too large, split numerically
+          finalSubgroups.push(...splitNumerically(subgroup, maxStringsPerGroup))
+        }
+      }
+      result.push({ group, subgroups: finalSubgroups })
+    } else {
+      // Couldn't split by nesting, split numerically
+      result.push({ group, subgroups: splitNumerically(group, maxStringsPerGroup) })
+    }
+  }
+
+  return result
+}
+
+function splitByNextLevel(group: TranslatableGroup): TranslatableGroup[] {
+  // Group strings by their second path element (first level under the group key)
+  const subgroupMap = new Map<string, Array<{ path: string[]; value: string }>>()
+
+  for (const str of group.strings) {
+    // path[0] is the group key, path[1] is the next level
+    const subKey = str.path[1] || '_flat'
+
+    if (!subgroupMap.has(subKey)) {
+      subgroupMap.set(subKey, [])
+    }
+    subgroupMap.get(subKey)!.push(str)
+  }
+
+  // If we only got one subgroup or no meaningful split, return original
+  if (subgroupMap.size <= 1) {
+    return [group]
+  }
+
+  return Array.from(subgroupMap.entries()).map(([subKey, strings]) => ({
+    groupKey: `${group.groupKey}.${subKey}`,
+    strings,
+  }))
+}
+
+function splitNumerically(
+  group: TranslatableGroup,
+  maxStringsPerGroup: number,
+): TranslatableGroup[] {
+  const chunks: TranslatableGroup[] = []
+  const totalChunks = Math.ceil(group.strings.length / maxStringsPerGroup)
+
+  for (let i = 0; i < group.strings.length; i += maxStringsPerGroup) {
+    const chunkIndex = Math.floor(i / maxStringsPerGroup) + 1
+    chunks.push({
+      groupKey: `${group.groupKey} (${chunkIndex}/${totalChunks})`,
+      strings: group.strings.slice(i, i + maxStringsPerGroup),
+    })
+  }
+
+  return chunks
+}
+
 export async function reconstructJSON(
   original: TranslatableJSON,
   translations: Array<{ path: string[]; value: string }>,

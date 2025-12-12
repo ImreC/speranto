@@ -2,6 +2,8 @@ import pg from 'pg'
 import { DatabaseAdapter, type SourceRow, type TranslationRow } from './adapter'
 import type { TableConfig } from '../types'
 
+const DEFAULT_SCHEMA = 'public'
+
 export class PostgresAdapter extends DatabaseAdapter {
   private client: pg.Client | null = null
   private connectionString: string
@@ -21,24 +23,24 @@ export class PostgresAdapter extends DatabaseAdapter {
     this.client = null
   }
 
-  getTranslationTableName(sourceTable: string, suffix: string): string {
-    return `${sourceTable}${suffix}`
+  private getQualifiedTableName(table: TableConfig, suffix = ''): string {
+    const schema = table.schema || DEFAULT_SCHEMA
+    return `"${schema}"."${table.name}${suffix}"`
   }
 
-  async ensureTranslationTable(
-    sourceTable: string,
-    columns: string[],
-    _idColumn: string,
-    suffix: string,
-  ): Promise<void> {
+  private getIndexName(table: TableConfig, suffix: string): string {
+    const schema = table.schema || DEFAULT_SCHEMA
+    return `idx_${schema}_${table.name}${suffix}_source_lang`
+  }
+
+  async ensureTranslationTable(table: TableConfig, suffix: string): Promise<void> {
     if (!this.client) throw new Error('Database not connected')
 
-    const translationTable = this.getTranslationTableName(sourceTable, suffix)
-
-    const columnDefs = columns.map((col) => `"${col}" TEXT`).join(', ')
+    const translationTable = this.getQualifiedTableName(table, suffix)
+    const columnDefs = table.columns.map((col) => `"${col}" TEXT`).join(', ')
 
     await this.client.query(`
-      CREATE TABLE IF NOT EXISTS "${translationTable}" (
+      CREATE TABLE IF NOT EXISTS ${translationTable} (
         id SERIAL PRIMARY KEY,
         source_id TEXT NOT NULL,
         lang TEXT NOT NULL,
@@ -49,9 +51,10 @@ export class PostgresAdapter extends DatabaseAdapter {
       )
     `)
 
+    const indexName = this.getIndexName(table, suffix)
     await this.client.query(`
-      CREATE INDEX IF NOT EXISTS "idx_${translationTable}_source_lang"
-      ON "${translationTable}"(source_id, lang)
+      CREATE INDEX IF NOT EXISTS "${indexName}"
+      ON ${translationTable}(source_id, lang)
     `)
   }
 
@@ -60,34 +63,36 @@ export class PostgresAdapter extends DatabaseAdapter {
 
     const idColumn = table.idColumn || 'id'
     const selectColumns = [idColumn, ...table.columns].map((c) => `"${c}"`).join(', ')
+    const qualifiedTable = this.getQualifiedTableName(table)
 
     const result = await this.client.query(
-      `SELECT ${selectColumns} FROM "${table.name}"`,
+      `SELECT ${selectColumns} FROM ${qualifiedTable}`,
     )
     const rows = result.rows as Record<string, unknown>[]
 
     return rows.map((row) => ({
       id: row[idColumn] as string | number,
       columns: table.columns.reduce((acc, col) => {
-        acc[col] = row[col] as string
+        const value = row[col]
+        acc[col] = value != null ? String(value) : ''
         return acc
       }, {} as Record<string, string>),
     }))
   }
 
   async getExistingTranslation(
-    sourceTable: string,
+    table: TableConfig,
     sourceId: string | number,
     lang: string,
     suffix: string,
   ): Promise<TranslationRow | null> {
     if (!this.client) throw new Error('Database not connected')
 
-    const translationTable = this.getTranslationTableName(sourceTable, suffix)
+    const translationTable = this.getQualifiedTableName(table, suffix)
 
     try {
       const result = await this.client.query(
-        `SELECT * FROM "${translationTable}" WHERE source_id = $1 AND lang = $2`,
+        `SELECT * FROM ${translationTable} WHERE source_id = $1 AND lang = $2`,
         [String(sourceId), lang],
       )
       const rows = result.rows as Record<string, unknown>[]
@@ -113,13 +118,13 @@ export class PostgresAdapter extends DatabaseAdapter {
   }
 
   async upsertTranslation(
-    sourceTable: string,
+    table: TableConfig,
     translation: TranslationRow,
     suffix: string,
   ): Promise<void> {
     if (!this.client) throw new Error('Database not connected')
 
-    const translationTable = this.getTranslationTableName(sourceTable, suffix)
+    const translationTable = this.getQualifiedTableName(table, suffix)
     const columnNames = Object.keys(translation.columns)
     const quotedColumns = columnNames.map((c) => `"${c}"`).join(', ')
     const placeholders = columnNames.map((_, i) => `$${i + 3}`).join(', ')
@@ -133,7 +138,7 @@ export class PostgresAdapter extends DatabaseAdapter {
 
     await this.client.query(
       `
-      INSERT INTO "${translationTable}" (source_id, lang, ${quotedColumns}, updated_at)
+      INSERT INTO ${translationTable} (source_id, lang, ${quotedColumns}, updated_at)
       VALUES ($1, $2, ${placeholders}, NOW())
       ON CONFLICT(source_id, lang) DO UPDATE SET
         ${updateSet},

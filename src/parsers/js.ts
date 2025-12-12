@@ -137,6 +137,90 @@ function isVariableReference(_path: any): boolean {
   return false
 }
 
+export interface SplitJSGroup {
+  group: TranslatableJSGroup
+  subgroups?: TranslatableJSGroup[]
+}
+
+export function splitLargeGroupsJS(
+  groups: TranslatableJSGroup[],
+  maxStringsPerGroup: number,
+): SplitJSGroup[] {
+  const result: SplitJSGroup[] = []
+
+  for (const group of groups) {
+    if (group.strings.length <= maxStringsPerGroup) {
+      result.push({ group })
+      continue
+    }
+
+    // Try to split by next nesting level first
+    const subgroups = splitByNextLevelJS(group)
+
+    if (subgroups.length > 1) {
+      // Successfully split by nesting, but some subgroups might still be too large
+      const finalSubgroups: TranslatableJSGroup[] = []
+      for (const subgroup of subgroups) {
+        if (subgroup.strings.length <= maxStringsPerGroup) {
+          finalSubgroups.push(subgroup)
+        } else {
+          // Subgroup still too large, split numerically
+          finalSubgroups.push(...splitNumericallyJS(subgroup, maxStringsPerGroup))
+        }
+      }
+      result.push({ group, subgroups: finalSubgroups })
+    } else {
+      // Couldn't split by nesting, split numerically
+      result.push({ group, subgroups: splitNumericallyJS(group, maxStringsPerGroup) })
+    }
+  }
+
+  return result
+}
+
+function splitByNextLevelJS(group: TranslatableJSGroup): TranslatableJSGroup[] {
+  // Group strings by their second objectPath element
+  const subgroupMap = new Map<string, TranslatableJSString[]>()
+
+  for (const str of group.strings) {
+    // objectPath[0] is the group key, objectPath[1] is the next level
+    const subKey = str.objectPath[1] || '_flat'
+
+    if (!subgroupMap.has(subKey)) {
+      subgroupMap.set(subKey, [])
+    }
+    subgroupMap.get(subKey)!.push(str)
+  }
+
+  // If we only got one subgroup or no meaningful split, return original
+  if (subgroupMap.size <= 1) {
+    return [group]
+  }
+
+  return Array.from(subgroupMap.entries()).map(([subKey, strings]) => ({
+    groupKey: `${group.groupKey}.${subKey}`,
+    strings,
+  }))
+}
+
+function splitNumericallyJS(
+  group: TranslatableJSGroup,
+  maxStringsPerGroup: number,
+): TranslatableJSGroup[] {
+  const chunks: TranslatableJSGroup[] = []
+  const totalChunks = Math.ceil(group.strings.length / maxStringsPerGroup)
+
+  for (let i = 0; i < group.strings.length; i += maxStringsPerGroup) {
+    const chunkIndex = Math.floor(i / maxStringsPerGroup) + 1
+    chunks.push({
+      groupKey: `${group.groupKey} (${chunkIndex}/${totalChunks})`,
+      strings: group.strings.slice(i, i + maxStringsPerGroup),
+    })
+  }
+
+  return chunks
+}
+
 export async function reconstructJS(
   ast: t.File,
   translations: Array<{ path: string; value: string }>,

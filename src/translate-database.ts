@@ -27,6 +27,7 @@ export function translateDatabaseTasks(config: Config): Listr {
         targetLang: lang,
         provider: dbConfig.provider,
         apiKey: dbConfig.apiKey,
+        instructionsDir: dbConfig.instructionsDir,
       }),
     ]),
   )
@@ -44,10 +45,9 @@ export function translateDatabaseTasks(config: Config): Listr {
         task: () =>
           new Listr(
             dbConfig.database.tables.map((table) => ({
-              title: table.name,
+              title: table.schema ? `${table.schema}.${table.name}` : table.name,
               task: async () => {
-                const idColumn = table.idColumn || 'id'
-                await adapter.ensureTranslationTable(table.name, table.columns, idColumn, suffix)
+                await adapter.ensureTranslationTable(table, suffix)
               },
             })),
             { concurrent: true },
@@ -58,7 +58,7 @@ export function translateDatabaseTasks(config: Config): Listr {
         task: () =>
           new Listr(
             dbConfig.database.tables.map((table) => ({
-              title: table.name,
+              title: table.schema ? `${table.schema}.${table.name}` : table.name,
               task: (_ctx, tableTask) =>
                 tableTask.newListr(
                   dbConfig.targetLangs.map((targetLang) => ({
@@ -108,7 +108,7 @@ async function translateTableTask(
   let skippedCount = 0
 
   for (const row of sourceRows) {
-    const existing = await adapter.getExistingTranslation(table.name, row.id, targetLang, suffix)
+    const existing = await adapter.getExistingTranslation(table, row.id, targetLang, suffix)
     if (existing) {
       skippedCount++
     } else {
@@ -135,8 +135,8 @@ async function translateTableTask(
     const translatedColumns: Record<string, string> = {}
 
     for (const [column, value] of Object.entries(row.columns)) {
-      if (!value || !value.trim()) {
-        translatedColumns[column] = value || ''
+      if (typeof value !== 'string' || !value.trim()) {
+        translatedColumns[column] = value ?? ''
         continue
       }
 
@@ -150,7 +150,7 @@ async function translateTableTask(
       columns: translatedColumns,
     }
 
-    await adapter.upsertTranslation(table.name, translation, suffix)
+    await adapter.upsertTranslation(table, translation, suffix)
     completed++
     updateTitle()
   }

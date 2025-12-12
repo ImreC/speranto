@@ -15,27 +15,20 @@ export abstract class DatabaseAdapter {
   abstract connect(): Promise<void>
   abstract close(): Promise<void>
 
-  abstract ensureTranslationTable(
-    sourceTable: string,
-    columns: string[],
-    idColumn: string,
-    suffix: string,
-  ): Promise<void>
+  abstract ensureTranslationTable(table: TableConfig, suffix: string): Promise<void>
 
   abstract getSourceRows(table: TableConfig): Promise<SourceRow[]>
 
   abstract getExistingTranslation(
-    sourceTable: string,
+    table: TableConfig,
     sourceId: string | number,
     lang: string,
     suffix: string,
   ): Promise<TranslationRow | null>
 
   abstract upsertTranslation(
-    sourceTable: string,
+    table: TableConfig,
     translation: TranslationRow,
     suffix: string,
   ): Promise<void>
-
-  abstract getTranslationTableName(sourceTable: string, suffix: string): string
 }

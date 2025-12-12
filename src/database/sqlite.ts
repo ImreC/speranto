@@ -37,21 +37,15 @@ export class SQLiteAdapter extends DatabaseAdapter {
     }
   }
 
-  getTranslationTableName(sourceTable: string, suffix: string): string {
-    return `${sourceTable}${suffix}`
+  private getTranslationTableName(table: TableConfig, suffix: string): string {
+    return `${table.name}${suffix}`
   }
 
-  async ensureTranslationTable(
-    sourceTable: string,
-    columns: string[],
-    _idColumn: string,
-    suffix: string,
-  ): Promise<void> {
+  async ensureTranslationTable(table: TableConfig, suffix: string): Promise<void> {
     if (!this.db) throw new Error('Database not connected')
 
-    const translationTable = this.getTranslationTableName(sourceTable, suffix)
-
-    const columnDefs = columns.map((col) => `${col} TEXT`).join(', ')
+    const translationTable = this.getTranslationTableName(table, suffix)
+    const columnDefs = table.columns.map((col) => `${col} TEXT`).join(', ')
 
     const sql = `
       CREATE TABLE IF NOT EXISTS ${translationTable} (
@@ -93,7 +87,8 @@ export class SQLiteAdapter extends DatabaseAdapter {
       id: row[idColumn] as string | number,
       columns: table.columns.reduce(
         (acc, col) => {
-          acc[col] = row[col] as string
+          const value = row[col]
+          acc[col] = value != null ? String(value) : ''
           return acc
         },
         {} as Record<string, string>,
@@ -102,14 +97,14 @@ export class SQLiteAdapter extends DatabaseAdapter {
   }
 
   async getExistingTranslation(
-    sourceTable: string,
+    table: TableConfig,
     sourceId: string | number,
     lang: string,
     suffix: string,
   ): Promise<TranslationRow | null> {
     if (!this.db) throw new Error('Database not connected')
 
-    const translationTable = this.getTranslationTableName(sourceTable, suffix)
+    const translationTable = this.getTranslationTableName(table, suffix)
 
     const sql = `SELECT * FROM ${translationTable} WHERE source_id = ? AND lang = ?`
 
@@ -141,13 +136,13 @@ export class SQLiteAdapter extends DatabaseAdapter {
   }
 
   async upsertTranslation(
-    sourceTable: string,
+    table: TableConfig,
     translation: TranslationRow,
     suffix: string,
   ): Promise<void> {
     if (!this.db) throw new Error('Database not connected')
 
-    const translationTable = this.getTranslationTableName(sourceTable, suffix)
+    const translationTable = this.getTranslationTableName(table, suffix)
     const columnNames = Object.keys(translation.columns)
     const columnPlaceholders = columnNames.map(() => '?').join(', ')
     const updateSet = columnNames.map((col) => `${col} = excluded.${col}`).join(', ')

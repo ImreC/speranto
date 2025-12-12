@@ -2,6 +2,7 @@ import type { LLMInterface } from './interface'
 
 export interface TableConfig {
   name: string
+  schema?: string
   columns: string[]
   idColumn?: string
 }
@@ -18,6 +19,7 @@ export interface FileConfig {
   sourceDir: string
   targetDir: string
   useLangCodeAsFilename?: boolean
+  maxStringsPerGroup?: number
 }
 
 export interface Config {
@@ -29,6 +31,7 @@ export interface Config {
   apiKey?: string
   llm?: LLMInterface
   verbose?: boolean
+  instructionsDir?: string
   files?: FileConfig
   database?: DatabaseConfig
 }

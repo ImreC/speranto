@@ -12,6 +12,7 @@ interface TranslatorOptions {
   provider?: 'ollama' | 'openai' | 'mistral'
   apiKey?: string
   llm?: LLMInterface
+  instructionsDir?: string
 }
 
 export class Translator {
@@ -43,11 +44,8 @@ export class Translator {
 
   private async loadLanguageInstructions(): Promise<void> {
     try {
-      const instructionsPath = join(
-        process.cwd(),
-        'instructions',
-        `${this.options.targetLang}.md`,
-      )
+      const baseDir = this.options.instructionsDir || join(process.cwd(), 'instructions')
+      const instructionsPath = join(baseDir, `${this.options.targetLang}.md`)
       if (existsSync(instructionsPath)) {
         this.languageInstructions = await readFile(instructionsPath, 'utf-8')
       }
