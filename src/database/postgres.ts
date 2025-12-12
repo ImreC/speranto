@@ -15,7 +15,15 @@ export class PostgresAdapter extends DatabaseAdapter {
 
   async connect(): Promise<void> {
     this.client = new pg.Client({ connectionString: this.connectionString })
-    await this.client.connect()
+    try {
+      await this.client.connect()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      throw new Error(
+        `Failed to connect to PostgreSQL: ${message}\n` +
+          'Check that your connection string is valid: postgresql://user:password@host:5432/dbname',
+      )
+    }
   }
 
   async close(): Promise<void> {

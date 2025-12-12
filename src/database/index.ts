@@ -12,6 +12,13 @@ export function createDatabaseAdapter(config: DatabaseConfig): DatabaseAdapter {
     case 'sqlite':
       return new SQLiteAdapter(config.connection)
     case 'postgres':
+      if (!config.connection) {
+        throw new Error(
+          'PostgreSQL connection string is required.\n' +
+            'Set it in your config: database.connection = "postgresql://user:password@host:5432/dbname"\n' +
+            'Or use an environment variable: database.connection = process.env.DATABASE_URL',
+        )
+      }
       return new PostgresAdapter(config.connection)
     case 'mysql':
       throw new Error('MySQL adapter not yet implemented')

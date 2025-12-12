@@ -9,12 +9,12 @@
     "url": "https://github.com/imrec/speranto.git"
   },
   "description": "A quick and simple machine translation tool for i18n in webapps",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "module": "dist/index.js",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "module": "dist/index.mjs",
   "type": "module",
   "bin": {
-    "speranto": "./dist/index.js"
+    "speranto": "./dist/index.mjs"
   },
   "publishConfig": {
     "access": "public"
@@ -24,13 +24,13 @@
   ],
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/types.d.ts"
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
     }
   },
   "scripts": {
     "types": "tsc src/types.ts --declaration --emitDeclarationOnly --outDir dist",
-    "build": "bun build index.ts --outdir dist --target bun --charset=utf8",
+    "build": "tsdown",
     "publish": "bun run build && bun publish && bunx jsr publish",
     "test": "LLM_API_KEY=test bun test"
   },
