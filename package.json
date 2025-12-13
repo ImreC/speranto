@@ -6,7 +6,7 @@
   "homepage": "https://github.com/imrec/speranto",
   "repository": {
     "type": "git",
-    "url": "https://github.com/imrec/speranto.git"
+    "url": "git+https://github.com/imrec/speranto.git"
   },
   "description": "A quick and simple machine translation tool for i18n in webapps",
   "main": "dist/index.mjs",
@@ -14,7 +14,7 @@
   "module": "dist/index.mjs",
   "type": "module",
   "bin": {
-    "speranto": "./dist/index.mjs"
+    "speranto": "dist/index.mjs"
   },
   "publishConfig": {
     "access": "public"
