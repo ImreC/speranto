@@ -35,9 +35,12 @@ export class OllamaProvider extends LLMInterface {
 
   async isModelAvailable(): Promise<boolean> {
     try {
+      console.log(`Checking Ollama model availability for ${this.model}...`)
+      const startTime = Date.now()
       const models = await ollama.list()
+      const elapsed = Date.now() - startTime
       const modelNames = models.models.map((m) => m.name)
-      console.log(`Available models: \n---\n${modelNames.join('\n')}\n---`)
+      console.log(`Ollama models list fetched in ${elapsed}ms. Available: ${modelNames.join(', ')}`)
       return modelNames.some((m) => m.includes(this.model))
     } catch (error) {
       console.error('Error checking Ollama models:', error)

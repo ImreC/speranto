@@ -3,6 +3,7 @@ import { LLMInterface, type LLMGenerateOptions, type LLMResponse } from './llm.i
 
 export class OpenAIProvider extends LLMInterface {
   private client: OpenAI
+  private modelChecked: boolean = false
 
   constructor(model: string, apiKey?: string) {
     super(model)
@@ -18,7 +19,10 @@ export class OpenAIProvider extends LLMInterface {
   }
 
   async generate(prompt: string, options?: LLMGenerateOptions): Promise<LLMResponse> {
-    await this.ensureModelReady()
+    if (!this.modelChecked) {
+      await this.ensureModelReady()
+      this.modelChecked = true
+    }
 
     const completion = await this.client.chat.completions.create({
       model: this.model,
@@ -52,7 +56,11 @@ export class OpenAIProvider extends LLMInterface {
 
   async isModelAvailable(): Promise<boolean> {
     try {
+      console.log(`Checking OpenAI model availability for ${this.model}...`)
+      const startTime = Date.now()
       const models = await this.client.models.list()
+      const elapsed = Date.now() - startTime
+      console.log(`OpenAI models list fetched in ${elapsed}ms`)
       return models.data.some((m) => m.id === this.model)
     } catch (error) {
       if (error instanceof OpenAI.AuthenticationError) {

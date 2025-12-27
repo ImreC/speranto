@@ -13,6 +13,7 @@ interface TranslatorOptions {
   apiKey?: string
   llm?: LLMInterface
   instructionsDir?: string
+  retranslate?: boolean
 }
 
 export class Translator {
@@ -24,8 +25,17 @@ export class Translator {
   constructor(options: TranslatorOptions) {
     this.options = options
     this.llm = options.llm ?? this.createLLMProvider()
-    this.isModelReady = this.llm.isModelLoaded()
+    this.isModelReady = this.checkModelReady()
     this.loadLanguageInstructions()
+  }
+
+  private async checkModelReady(): Promise<boolean> {
+    const startTime = Date.now()
+    console.log(`[${this.options.targetLang}] Checking if model ${this.options.model} is ready...`)
+    const result = await this.llm.isModelLoaded()
+    const elapsed = Date.now() - startTime
+    console.log(`[${this.options.targetLang}] Model ready check completed in ${elapsed}ms`)
+    return result
   }
 
   private createLLMProvider(): LLMInterface {
@@ -91,12 +101,9 @@ export class Translator {
     if (!chunk.text.trim()) return chunk.text
     await this.isModelReady
 
-    const response = await this.llm.generate(
-      this.constructPrompt(chunk.text, chunk.context),
-      {
-        temperature: this.options.temperature,
-      },
-    )
+    const response = await this.llm.generate(this.constructPrompt(chunk.text, chunk.context), {
+      temperature: this.options.temperature,
+    })
 
     return response.content
   }
@@ -129,9 +136,17 @@ export class Translator {
 
     prompt += `\n\nThese strings belong to the "${groupKey}" section/page of an application. Ensure consistency in terminology and style across all strings in this group.`
 
+    prompt += `\n\nYou MUST translate ALL values without exception. Do not skip any values, including slugs or identifiers while being mindfull of words typically borrowed from other languages. Keep it how it is common to do in ${this.options.targetLang}`
+
+    if (!this.options.retranslate) {
+      prompt += ` However, if a value appears to already be translated into ${this.options.targetLang}, keep it as-is.`
+    }
+
     prompt += `\n\nYou maintain the original JSON structure exactly. You respond with valid JSON only, no additional text or explanation.`
 
-    prompt += `\n\nTranslate the following JSON from ${this.options.sourceLang} to ${this.options.targetLang}:\n\n${JSON.stringify(jsonInput, null, 2)}`
+    prompt += `\n\nTranslate the following JSON from ${this.options.sourceLang} to ${
+      this.options.targetLang
+    }:\n\n${JSON.stringify(jsonInput, null, 2)}`
 
     return prompt
   }
@@ -158,7 +173,9 @@ export class Translator {
         value: parsed[key] ?? originalStrings.find((s) => s.key === key)?.value ?? '',
       }))
     } catch {
-      console.warn('Failed to parse group translation response as JSON, falling back to individual translations')
+      console.warn(
+        'Failed to parse group translation response as JSON, falling back to individual translations',
+      )
       return originalStrings
     }
   }

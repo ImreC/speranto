@@ -20,15 +20,14 @@ program
   .option('-m, --model <model>', 'Model to use for translation')
   .option('-t, --temperature <number>', 'Temperature for translation', parseFloat)
   .option('-s, --source-lang <lang>', 'Source language code')
-  .option(
-    '-l, --target-langs <langs>',
-    'Target language codes (comma-separated)',
-    (value) => value.split(','),
+  .option('-l, --target-langs <langs>', 'Target language codes (comma-separated)', (value) =>
+    value.split(','),
   )
   .option('-p, --provider <provider>', 'LLM provider (openai, ollama, mistral)')
   .option('-k, --api-key <key>', 'API key for LLM provider')
   .option('-i, --instructions-dir <path>', 'Directory containing language instruction files')
   .option('-v, --verbose', 'Enable verbose output for debugging')
+  .option('-r, --retranslate', 'Force retranslation of all values, even if already translated')
   .action(async (options) => {
     const passedConfig = await loadConfig(options.config)
 
@@ -46,6 +45,7 @@ program
       instructionsDir: options.instructionsDir || passedConfig.instructionsDir,
       files: passedConfig.files,
       database: passedConfig.database,
+      retranslate: options.retranslate || passedConfig.retranslate || false,
     }
 
     if (!config.files && !config.database) {
@@ -54,15 +54,20 @@ program
       process.exit(1)
     }
 
+    console.log(`Speranto v${pkg.version}`)
     console.log(
-      `Starting translation from ${config.sourceLang} to ${config.targetLangs.join(', ')} using model ${config.model}`,
+      `Starting translation from ${config.sourceLang} to ${config.targetLangs.join(
+        ', ',
+      )} using model ${config.model}`,
     )
 
     if (config.files) {
       console.log(`Files: ${config.files.sourceDir} -> ${config.files.targetDir}`)
     }
     if (config.database) {
-      console.log(`Database: ${config.database.type} (${config.database.tables.length} tables)`)
+      console.log(
+        `Database: ${config.database.type} (${config.database.tables.length} tables)`,
+      )
     }
 
     try {

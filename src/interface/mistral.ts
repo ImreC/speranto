@@ -3,6 +3,7 @@ import { LLMInterface, type LLMGenerateOptions, type LLMResponse } from './llm.i
 
 export class MistralProvider extends LLMInterface {
   private client: Mistral
+  private modelChecked: boolean = false
 
   constructor(model: string, apiKey?: string) {
     super(model)
@@ -18,7 +19,10 @@ export class MistralProvider extends LLMInterface {
   }
 
   async generate(prompt: string, options?: LLMGenerateOptions): Promise<LLMResponse> {
-    await this.ensureModelReady()
+    if (!this.modelChecked) {
+      await this.ensureModelReady()
+      this.modelChecked = true
+    }
 
     const completion = await this.client.chat.complete({
       model: this.model,
@@ -43,7 +47,11 @@ export class MistralProvider extends LLMInterface {
 
   async isModelAvailable(): Promise<boolean> {
     try {
+      console.log(`Checking Mistral model availability for ${this.model}...`)
+      const startTime = Date.now()
       const models = await this.client.models.list()
+      const elapsed = Date.now() - startTime
+      console.log(`Mistral models list fetched in ${elapsed}ms`)
       const modelNames = models?.data?.map((m) => m.name)
       return modelNames?.some((m) => m === this.model) || false
     } catch (error) {

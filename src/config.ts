@@ -90,4 +90,6 @@ export interface Config {
   files?: FileConfig
   /** Database translation configuration */
   database?: DatabaseConfig
+  /** Force retranslation of all values, even if already translated */
+  retranslate?: boolean
 }

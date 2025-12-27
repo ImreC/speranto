@@ -113,6 +113,7 @@ function translateFiles(config: FileTranslateConfig): Listr {
               apiKey: config.apiKey,
               llm: config.llm,
               instructionsDir: config.instructionsDir,
+              retranslate: config.retranslate,
             }),
           ]),
         )
@@ -202,11 +203,12 @@ async function translateMarkdownFile(
   translator: Translator,
   task: any,
 ) {
+  task.title = `${targetLang}: reading source file...`
   const content = await readFile(filePath, 'utf-8')
   const tree = await parseMarkdown(content)
   const chunks = await getTranslatableChunks(tree)
 
-  task.title = `${targetLang}: ${chunks.length} chunks`
+  task.title = `${targetLang}: translating ${chunks.length} chunks...`
 
   const translatedTree: Root = JSON.parse(JSON.stringify(tree))
 
@@ -287,6 +289,7 @@ async function translateJSONFile(
   translator: Translator,
   task: any,
 ) {
+  task.title = `${targetLang}: reading source file...`
   const content = await readFile(filePath, 'utf-8')
   const jsonData = await parseJSON(content)
   const groups = await extractTranslatableGroups(jsonData)
@@ -299,6 +302,7 @@ async function translateJSONFile(
   const existingTranslations = new Map<string, string>()
   let existingGroups: TranslatableGroup[] = []
 
+  task.title = `${targetLang}: checking existing translations...`
   if (existsSync(targetPath)) {
     try {
       const existingContent = await readFile(targetPath, 'utf-8')
@@ -431,6 +435,7 @@ async function translateJSFile(
   isTypeScript: boolean,
   task: any,
 ) {
+  task.title = `${targetLang}: reading source file...`
   const content = await readFile(filePath, 'utf-8')
   const ast = await parseJS(content, isTypeScript)
   const groups = await extractTranslatableGroupsJS(ast)
@@ -443,6 +448,7 @@ async function translateJSFile(
   const existingTranslations = new Map<string, string>()
   let existingGroups: TranslatableJSGroup[] = []
 
+  task.title = `${targetLang}: checking existing translations...`
   if (existsSync(targetPath)) {
     try {
       const existingContent = await readFile(targetPath, 'utf-8')

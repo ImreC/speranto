@@ -102,11 +102,18 @@ async function translateTableTask(
   concurrency: number,
   task: any,
 ): Promise<void> {
+  task.title = `${targetLang}: fetching source rows...`
+  const sourceRowsPromise = adapter.getSourceRows(table)
+
+  task.title = `${targetLang}: fetching existing translations...`
+  const translatedIdsPromise = adapter.getTranslatedIds(table, targetLang, suffix)
+
   const [sourceRows, translatedIds] = await Promise.all([
-    adapter.getSourceRows(table),
-    adapter.getTranslatedIds(table, targetLang, suffix),
+    sourceRowsPromise,
+    translatedIdsPromise,
   ])
 
+  task.title = `${targetLang}: comparing ${sourceRows.length} rows...`
   const rowsToTranslate = sourceRows.filter((row) => !translatedIds.has(String(row.id)))
   const skippedCount = sourceRows.length - rowsToTranslate.length
 
@@ -119,7 +126,8 @@ async function translateTableTask(
   let completed = 0
 
   const updateTitle = () => {
-    task.title = `${targetLang}: ${completed}/${total} rows` +
+    task.title =
+      `${targetLang}: ${completed}/${total} rows` +
       (skippedCount > 0 ? ` (${skippedCount} skipped)` : '')
   }
 
