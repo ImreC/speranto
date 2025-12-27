@@ -25,17 +25,8 @@ export class Translator {
   constructor(options: TranslatorOptions) {
     this.options = options
     this.llm = options.llm ?? this.createLLMProvider()
-    this.isModelReady = this.checkModelReady()
+    this.isModelReady = this.llm.isModelLoaded()
     this.loadLanguageInstructions()
-  }
-
-  private async checkModelReady(): Promise<boolean> {
-    const startTime = Date.now()
-    console.log(`[${this.options.targetLang}] Checking if model ${this.options.model} is ready...`)
-    const result = await this.llm.isModelLoaded()
-    const elapsed = Date.now() - startTime
-    console.log(`[${this.options.targetLang}] Model ready check completed in ${elapsed}ms`)
-    return result
   }
 
   private createLLMProvider(): LLMInterface {

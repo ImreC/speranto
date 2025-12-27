@@ -101,68 +101,110 @@ async function translateTableTask(
   suffix: string,
   concurrency: number,
   task: any,
-): Promise<void> {
-  task.title = `${targetLang}: fetching source rows...`
-  const sourceRowsPromise = adapter.getSourceRows(table)
+): Promise<Listr> {
+  return task.newListr(
+    [
+      {
+        title: `${targetLang}: fetching data...`,
+        task: async (ctx: any, fetchTask: any) => {
+          fetchTask.title = `${targetLang}: fetching source rows...`
+          const sourceRowsPromise = adapter.getSourceRows(table)
 
-  task.title = `${targetLang}: fetching existing translations...`
-  const translatedIdsPromise = adapter.getTranslatedIds(table, targetLang, suffix)
+          fetchTask.title = `${targetLang}: fetching existing translations...`
+          const translatedIdsPromise = adapter.getTranslatedIds(table, targetLang, suffix)
 
-  const [sourceRows, translatedIds] = await Promise.all([
-    sourceRowsPromise,
-    translatedIdsPromise,
-  ])
+          const [sourceRows, translatedIds] = await Promise.all([
+            sourceRowsPromise,
+            translatedIdsPromise,
+          ])
 
-  task.title = `${targetLang}: comparing ${sourceRows.length} rows...`
-  const rowsToTranslate = sourceRows.filter((row) => !translatedIds.has(String(row.id)))
-  const skippedCount = sourceRows.length - rowsToTranslate.length
+          ctx.sourceRows = sourceRows
+          ctx.translatedIds = translatedIds
+          fetchTask.title = `${targetLang}: found ${sourceRows.length} rows`
+        },
+      },
+      {
+        title: `${targetLang}: translating...`,
+        task: async (ctx: any, translateTask: any) => {
+          const rowsToTranslate = ctx.sourceRows.filter(
+            (row: any) => !ctx.translatedIds.has(String(row.id)),
+          )
+          const skippedCount = ctx.sourceRows.length - rowsToTranslate.length
 
-  if (rowsToTranslate.length === 0) {
-    task.skip(`${skippedCount} rows already translated`)
-    return
-  }
+          if (rowsToTranslate.length === 0) {
+            translateTask.skip(`${skippedCount} rows already translated`)
+            return
+          }
 
-  const total = rowsToTranslate.length
-  let completed = 0
+          const total = rowsToTranslate.length
+          let completed = 0
+          let inProgress = 0
 
-  const updateTitle = () => {
-    task.title =
-      `${targetLang}: ${completed}/${total} rows` +
-      (skippedCount > 0 ? ` (${skippedCount} skipped)` : '')
-  }
+          const updateTitle = () => {
+            const skippedText = skippedCount > 0 ? ` (${skippedCount} skipped)` : ''
+            const inProgressText = inProgress > 0 ? `, ${inProgress} in progress` : ''
+            translateTask.title =
+              `${targetLang}: ${completed}/${total} rows${inProgressText}${skippedText}`
+          }
 
-  updateTitle()
+          updateTitle()
 
-  const translateRow = async (row: (typeof rowsToTranslate)[number]) => {
-    const translatedColumns: Record<string, string> = {}
+          const translateRow = async (row: (typeof rowsToTranslate)[number]) => {
+            inProgress++
+            updateTitle()
 
-    for (const [column, value] of Object.entries(row.columns)) {
-      if (typeof value !== 'string' || !value.trim()) {
-        translatedColumns[column] = value ?? ''
-        continue
-      }
+            const columns = Object.entries(row.columns)
+            const columnsToTranslate = columns.filter(
+              ([, value]) => typeof value === 'string' && value.trim(),
+            )
+            const emptyColumns = columns.filter(
+              ([, value]) => typeof value !== 'string' || !value.trim(),
+            )
 
-      const translated = await translator.translateText(value)
-      translatedColumns[column] = translated
-    }
+            const translatedColumns: Record<string, string> = {}
 
-    const translation: TranslationRow = {
-      sourceId: row.id,
-      lang: targetLang,
-      columns: translatedColumns,
-    }
+            // Keep empty/non-string columns as-is
+            for (const [column, value] of emptyColumns) {
+              translatedColumns[column] = (value as string) ?? ''
+            }
 
-    await adapter.upsertTranslation(table, translation, suffix)
-    completed++
-    updateTitle()
-  }
+            // Batch translate all non-empty columns in a single LLM call
+            if (columnsToTranslate.length > 0) {
+              const strings = columnsToTranslate.map(([column, value]) => ({
+                key: column,
+                value: value as string,
+              }))
 
-  const chunks: typeof rowsToTranslate[] = []
-  for (let i = 0; i < rowsToTranslate.length; i += concurrency) {
-    chunks.push(rowsToTranslate.slice(i, i + concurrency))
-  }
+              const translated = await translator.translateGroup(`row_${row.id}`, strings)
 
-  for (const chunk of chunks) {
-    await Promise.all(chunk.map(translateRow))
-  }
+              for (const { key, value } of translated) {
+                translatedColumns[key] = value
+              }
+            }
+
+            const translation: TranslationRow = {
+              sourceId: row.id,
+              lang: targetLang,
+              columns: translatedColumns,
+            }
+
+            await adapter.upsertTranslation(table, translation, suffix)
+            inProgress--
+            completed++
+            updateTitle()
+          }
+
+          const chunks: typeof rowsToTranslate[] = []
+          for (let i = 0; i < rowsToTranslate.length; i += concurrency) {
+            chunks.push(rowsToTranslate.slice(i, i + concurrency))
+          }
+
+          for (const chunk of chunks) {
+            await Promise.all(chunk.map(translateRow))
+          }
+        },
+      },
+    ],
+    { concurrent: false },
+  )
 }

@@ -56,18 +56,12 @@ export class OpenAIProvider extends LLMInterface {
 
   async isModelAvailable(): Promise<boolean> {
     try {
-      console.log(`Checking OpenAI model availability for ${this.model}...`)
-      const startTime = Date.now()
       const models = await this.client.models.list()
-      const elapsed = Date.now() - startTime
-      console.log(`OpenAI models list fetched in ${elapsed}ms`)
       return models.data.some((m) => m.id === this.model)
     } catch (error) {
       if (error instanceof OpenAI.AuthenticationError) {
-        console.error('OpenAI API key is invalid or missing')
         return false
       }
-      console.error('Error checking OpenAI models:', error)
       return false
     }
   }
@@ -78,13 +72,7 @@ export class OpenAIProvider extends LLMInterface {
         'OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass it to the constructor.',
       )
     }
-
-    const isAvailable = await this.isModelAvailable()
-    if (!isAvailable) {
-      console.warn(
-        `Model ${this.model} may not be available or you don't have access to it. Proceeding anyway...`,
-      )
-    }
+    await this.isModelAvailable()
   }
 
   async isModelLoaded(): Promise<boolean> {

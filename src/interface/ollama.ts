@@ -35,15 +35,10 @@ export class OllamaProvider extends LLMInterface {
 
   async isModelAvailable(): Promise<boolean> {
     try {
-      console.log(`Checking Ollama model availability for ${this.model}...`)
-      const startTime = Date.now()
       const models = await ollama.list()
-      const elapsed = Date.now() - startTime
       const modelNames = models.models.map((m) => m.name)
-      console.log(`Ollama models list fetched in ${elapsed}ms. Available: ${modelNames.join(', ')}`)
       return modelNames.some((m) => m.includes(this.model))
-    } catch (error) {
-      console.error('Error checking Ollama models:', error)
+    } catch {
       return false
     }
   }
@@ -52,37 +47,21 @@ export class OllamaProvider extends LLMInterface {
     const isAvailable = await this.isModelAvailable()
 
     if (isAvailable) {
-      console.log(`Model ${this.model} available`)
       return true
     }
-
-    console.log(`Model ${this.model} not found locally. Pulling from Ollama...`)
 
     try {
       const stream = await ollama.pull({
         model: this.model,
         stream: true,
       })
-      let message = ''
 
-      for await (const progress of stream) {
-        // Log progress to console as well
-        let newMessage
-        const percentage = Math.round((progress.completed / progress.total) * 100)
-        newMessage = `Pulling ${this.model}: ${progress.status}`
-        if (progress.total > 0 && !isNaN(percentage)) {
-          newMessage += ` - ${percentage}%`
-        }
-        if (newMessage !== message) {
-          console.log(newMessage)
-          message = newMessage
-        }
+      for await (const _progress of stream) {
+        // Consume the stream
       }
 
-      console.log(`Model ${this.model} pulled successfully`)
       return true
     } catch (error) {
-      console.error(`Error pulling model ${this.model}:`, error)
       throw new Error(`Failed to pull model ${this.model}: ${error}`)
     }
   }

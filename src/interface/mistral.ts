@@ -47,26 +47,16 @@ export class MistralProvider extends LLMInterface {
 
   async isModelAvailable(): Promise<boolean> {
     try {
-      console.log(`Checking Mistral model availability for ${this.model}...`)
-      const startTime = Date.now()
       const models = await this.client.models.list()
-      const elapsed = Date.now() - startTime
-      console.log(`Mistral models list fetched in ${elapsed}ms`)
       const modelNames = models?.data?.map((m) => m.name)
       return modelNames?.some((m) => m === this.model) || false
-    } catch (error) {
-      console.error('Error checking Mistral models:', error)
+    } catch {
       return false
     }
   }
 
   async ensureModelReady(): Promise<void> {
-    const isAvailable = await this.isModelAvailable()
-    if (!isAvailable) {
-      console.warn(
-        `Model ${this.model} may not be available or you don't have access to it. Proceeding anyway...`,
-      )
-    }
+    await this.isModelAvailable()
   }
 
   async isModelLoaded(): Promise<boolean> {
