@@ -23,15 +23,12 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Publish to JSR
-        run: bunx jsr publish
+      # - name: Publish to JSR
+      #   run: bunx jsr publish
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
-
-      - name: Update npm
-        run: npm install -g npm@latest
+          node-version: "24"
 
       - name: Publish to npm
-        run: npm publish --access public
+        run: npm publish --provenance --access public
