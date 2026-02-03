@@ -3,10 +3,10 @@
   "version": "0.1.2",
   "license": "MIT",
   "author": "Imre Gelens",
-  "homepage": "https://github.com/imrec/speranto",
+  "homepage": "https://github.com/ImreC/speranto",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/imrec/speranto.git"
+    "url": "https://github.com/ImreC/speranto"
   },
   "description": "A quick and simple machine translation tool for i18n in webapps",
   "main": "dist/index.mjs",
