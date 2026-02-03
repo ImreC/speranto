@@ -92,4 +92,6 @@ export interface Config {
   database?: DatabaseConfig
   /** Force retranslation of all values, even if already translated */
   retranslate?: boolean
+  /** Process all translations sequentially (no concurrency) */
+  sequential?: boolean
 }

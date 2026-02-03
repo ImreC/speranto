@@ -66,7 +66,7 @@ export async function translate(config: Config) {
   logLanguageInstructions(config)
 
   const listr = new Listr(tasks, {
-    concurrent: true,
+    concurrent: !config.sequential,
     renderer: 'default',
     rendererOptions: {
       collapseSubtasks: false,
@@ -93,8 +93,16 @@ function translateFiles(config: FileTranslateConfig): Listr {
             ? join(files.sourceDir, `**/${config.sourceLang}.${ext}`)
             : join(files.sourceDir, `**/*.${ext}`),
         )
-        const allFiles = await Promise.all(patterns.map((pattern) => glob(pattern)))
-        ctx.fileList = allFiles.flat()
+        if (config.sequential) {
+          const allFiles: string[][] = []
+          for (const pattern of patterns) {
+            allFiles.push(await glob(pattern))
+          }
+          ctx.fileList = allFiles.flat()
+        } else {
+          const allFiles = await Promise.all(patterns.map((pattern) => glob(pattern)))
+          ctx.fileList = allFiles.flat()
+        }
       },
     },
     {
@@ -159,11 +167,11 @@ function translateFiles(config: FileTranslateConfig): Listr {
                       }
                     },
                   })),
-                  { concurrent: true },
+                  { concurrent: !config.sequential },
                 ),
             }
           }),
-          { concurrent: true },
+          { concurrent: !config.sequential },
         )
       },
     },
@@ -212,12 +220,23 @@ async function translateMarkdownFile(
 
   const translatedTree: Root = JSON.parse(JSON.stringify(tree))
 
-  const translatedChunks = await Promise.all(
-    chunks.map(async (chunk) => ({
-      ...chunk,
-      text: await translator.translateChunk(chunk),
-    })),
-  )
+  let translatedChunks: Array<typeof chunks[number] & { text: string }>
+  if (config.sequential) {
+    translatedChunks = []
+    for (const chunk of chunks) {
+      translatedChunks.push({
+        ...chunk,
+        text: await translator.translateChunk(chunk),
+      })
+    }
+  } else {
+    translatedChunks = await Promise.all(
+      chunks.map(async (chunk) => ({
+        ...chunk,
+        text: await translator.translateChunk(chunk),
+      })),
+    )
+  }
 
   for (const translatedChunk of translatedChunks) {
     const translatedNodes = await parseMarkdown(translatedChunk.text)
@@ -391,7 +410,7 @@ async function translateJSONFile(
               title: `"${subgroup.groupKey}" (${subgroup.strings.length} strings)`,
               task: () => translateGroup(subgroup),
             })),
-            { concurrent: true, exitOnError: false },
+            { concurrent: !config.sequential, exitOnError: false },
           ),
       }
     }
@@ -411,7 +430,7 @@ async function translateJSONFile(
       {
         title: `Translating ${changedGroups.length} groups`,
         task: (_: unknown, groupsTask: any) =>
-          groupsTask.newListr(groupTasks, { concurrent: true, exitOnError: false }),
+          groupsTask.newListr(groupTasks, { concurrent: !config.sequential, exitOnError: false }),
       },
       {
         title: 'Writing output',
@@ -539,7 +558,7 @@ async function translateJSFile(
               title: `"${subgroup.groupKey}" (${subgroup.strings.length} strings)`,
               task: () => translateGroup(subgroup),
             })),
-            { concurrent: true, exitOnError: false },
+            { concurrent: !config.sequential, exitOnError: false },
           ),
       }
     }
@@ -559,7 +578,7 @@ async function translateJSFile(
       {
         title: `Translating ${changedGroups.length} groups`,
         task: (_: unknown, groupsTask: any) =>
-          groupsTask.newListr(groupTasks, { concurrent: true, exitOnError: false }),
+          groupsTask.newListr(groupTasks, { concurrent: !config.sequential, exitOnError: false }),
       },
       {
         title: 'Writing output',

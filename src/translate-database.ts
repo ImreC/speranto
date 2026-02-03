@@ -14,7 +14,7 @@ export function translateDatabaseTasks(config: Config): Listr {
 
   const dbConfig = config as DatabaseConfig
   const suffix = dbConfig.database.translationTableSuffix || '_translations'
-  const concurrency = dbConfig.database.concurrency || DEFAULT_CONCURRENCY
+  const concurrency = dbConfig.sequential ? 1 : (dbConfig.database.concurrency || DEFAULT_CONCURRENCY)
   const adapter = createDatabaseAdapter(dbConfig.database)
 
   const translators = new Map(
@@ -50,7 +50,7 @@ export function translateDatabaseTasks(config: Config): Listr {
                 await adapter.ensureTranslationTable(table, suffix)
               },
             })),
-            { concurrent: true },
+            { concurrent: !dbConfig.sequential },
           ),
       },
       {
@@ -74,7 +74,7 @@ export function translateDatabaseTasks(config: Config): Listr {
                         langTask,
                       ),
                   })),
-                  { concurrent: true },
+                  { concurrent: !dbConfig.sequential },
                 ),
             })),
             { concurrent: false },
