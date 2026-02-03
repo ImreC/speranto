@@ -32,7 +32,6 @@
     "types": "tsc src/types.ts --declaration --emitDeclarationOnly --outDir dist",
     "build": "tsdown",
     "link": "bun run build && bun link",
-    "publish": "bun run build && bun publish && bunx jsr publish",
     "test": "LLM_API_KEY=test bun test"
   },
   "devDependencies": {
