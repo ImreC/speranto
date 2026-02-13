@@ -7,6 +7,8 @@ Guidelines for AI coding agents working in this repository.
 Speranto is a machine translation CLI tool for i18n in web apps. It translates JSON, JS/TS,
 Markdown files and database content using LLM providers (OpenAI, Mistral, Ollama).
 
+Published to npm as `@speranto/speranto` and to JSR as `@speranto/speranto`.
+
 ## Build/Lint/Test Commands
 
 Use Bun instead of Node.js for all tooling:
@@ -68,7 +70,7 @@ Order imports as follows:
 
 ```typescript
 import { readFile, writeFile } from 'node:fs/promises'
-import { join, dirname } from 'path'
+import { join, dirname } from 'node:path'
 import { glob } from 'glob'
 import { Translator } from './translator'
 import type { Config, FileConfig } from './types'
@@ -146,7 +148,7 @@ Use Node.js APIs, NOT Bun-specific APIs:
 // Correct
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, dirname, relative, extname } from 'path'
+import { join, dirname, relative, extname } from 'node:path'
 
 // Incorrect - do NOT use in runtime code
 Bun.file()
@@ -176,25 +178,54 @@ real API calls in tests.
 ## Project Structure
 
 ```
+index.ts              # CLI entry point (Commander.js)
 src/
-├── database/       # Database adapters (SQLite, PostgreSQL)
-├── interface/      # LLM provider implementations
-├── parsers/        # File parsers (JSON, JS/TS, Markdown)
-├── util/           # Utility functions
-├── config.ts       # Configuration types (exported to consumers)
-├── translate.ts    # Main translation orchestration
-├── translator.ts   # Core translation logic
-└── types.ts        # Extended types for internal use
+├── config.ts         # Configuration types (exported to consumers)
+├── translate.ts      # Main file translation orchestration
+├── translate-database.ts  # Database translation orchestration
+├── translator.ts     # Core Translator class (prompt construction, LLM calls)
+├── types.ts          # Extended Config type for internal use
+├── database/
+│   ├── adapter.ts    # Abstract DatabaseAdapter base class
+│   ├── index.ts      # Database adapter factory
+│   ├── sqlite.ts     # SQLite adapter (sql.js)
+│   └── postgres.ts   # PostgreSQL adapter (pg)
+├── interface/
+│   ├── llm.interface.ts  # Abstract LLMInterface base class
+│   ├── index.ts      # Provider exports
+│   ├── openai.ts     # OpenAI provider
+│   ├── mistral.ts    # Mistral provider
+│   └── ollama.ts     # Ollama provider
+├── parsers/
+│   ├── json.ts       # JSON file parser
+│   ├── js.ts         # JS/TS parser (Babel)
+│   └── md.ts         # Markdown parser (Remark)
+└── util/
+    └── config.ts     # Config file loading utility
 tests/
-├── mocks/          # Mock implementations
-├── database/       # Database adapter tests
-├── parsers/        # Parser tests
-└── *.test.ts       # Other test files
+├── mocks/
+│   ├── LLMProvider.ts    # Mock LLM provider
+│   └── BunFile.ts
+├── database/
+│   ├── sqlite.test.ts
+│   └── postgres.test.ts
+├── parsers/
+│   ├── json.test.ts
+│   ├── js.test.ts
+│   └── md.test.ts
+├── translator.test.ts
+├── translate.test.ts
+├── providers.test.ts
+└── docker-compose.yml    # PostgreSQL for database tests
 ```
 
 ## Architecture Notes
 
-- `LLMInterface` is the abstract base class for all LLM providers
+- `LLMInterface` is the abstract base class for all LLM providers (generate, isModelLoaded)
 - `DatabaseAdapter` is the abstract base class for database backends
 - Parsers extract translatable strings and reconstruct files after translation
 - Translation is orchestrated via Listr2 for progress display
+- Change detection avoids retranslating unchanged content (override with `retranslate: true`)
+- `sequential` mode processes translations one at a time (for low rate-limit setups)
+- Default provider is `mistral` with model `mistral-large-latest`
+- CLI options override config file values; config loaded from `speranto.config.ts` or `.js`

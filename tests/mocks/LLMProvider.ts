@@ -21,16 +21,36 @@ export class MockLLMProvider extends LLMInterface {
       throw new Error('Mock LLM error')
     }
 
+    // Check if this is a JSON group translation prompt
+    if (prompt.includes('respond with valid JSON only')) {
+      const jsonMatch = prompt.match(/Translate the following JSON[^:]*:\n\n([\s\S]+?)$/)
+      if (jsonMatch) {
+        try {
+          const inputJson = JSON.parse(jsonMatch[1]!)
+          const outputJson: Record<string, string> = {}
+          for (const [key, value] of Object.entries(inputJson)) {
+            const mockValue = this.mockResponses.get(String(value))
+            outputJson[key] = mockValue ?? `[Translated: ${value}]`
+          }
+          return {
+            content: JSON.stringify(outputJson, null, 2),
+            model: this.model,
+            finishReason: 'stop',
+            usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+          }
+        } catch {
+          // Fall through to default handling
+        }
+      }
+    }
+
     // Extract the text to translate from the prompt
-    // Try multiple patterns to match different prompt formats
     let textToTranslate = ''
 
-    // Pattern 1: Translate: "text" from
     let match = prompt.match(/Translate: "(.*)" from/)
     if (match) {
       textToTranslate = match[1] as string
     } else {
-      // Pattern 2: Translate the following ... from X to Y:\n\n<content>
       match = prompt.match(
         /Translate the following .* from \w+ to \w+:\n\n([\s\S]+?)(?:\n\nThis is a complete|$)/,
       )
@@ -39,7 +59,6 @@ export class MockLLMProvider extends LLMInterface {
       }
     }
 
-    // Return a mock translation
     const mockTranslation =
       this.mockResponses.get(textToTranslate.trim()) || `[Translated: ${textToTranslate}]`
 

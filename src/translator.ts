@@ -1,7 +1,8 @@
 import { join } from 'path'
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { LLMInterface, OllamaProvider, OpenAIProvider, MistralProvider } from './interface'
+import { LLMInterface } from './interface'
+import { OpenAICompatibleProvider } from './interface/openai-compatible'
 import type { TranslatableChunk } from './parsers/md'
 
 interface TranslatorOptions {
@@ -9,7 +10,8 @@ interface TranslatorOptions {
   temperature: number
   sourceLang: string
   targetLang: string
-  provider?: 'ollama' | 'openai' | 'mistral'
+  provider?: string
+  baseUrl?: string
   apiKey?: string
   llm?: LLMInterface
   instructionsDir?: string
@@ -30,17 +32,11 @@ export class Translator {
   }
 
   private createLLMProvider(): LLMInterface {
-    const provider = this.options.provider || 'ollama'
-
-    switch (provider) {
-      case 'openai':
-        return new OpenAIProvider(this.options.model, this.options.apiKey)
-      case 'mistral':
-        return new MistralProvider(this.options.model, this.options.apiKey)
-      case 'ollama':
-      default:
-        return new OllamaProvider(this.options.model)
-    }
+    return new OpenAICompatibleProvider(this.options.model, {
+      apiKey: this.options.apiKey,
+      baseUrl: this.options.baseUrl,
+      provider: this.options.provider,
+    })
   }
 
   private async loadLanguageInstructions(): Promise<void> {
@@ -62,7 +58,6 @@ export class Translator {
     if (this.languageInstructions) {
       prompt += `\n\You are following these language-specific guidelines:\n${this.languageInstructions}`
     }
-    // Add context-specific instructions
     if (context === 'code') {
       prompt += `\n\The text is a code block. Only translate comments and documentation strings, not the code itself.`
     } else if (context === 'list-with-context') {
@@ -117,6 +112,51 @@ export class Translator {
     return this.parseGroupResponse(response.content, strings)
   }
 
+  async translateGroupWithContext(
+    groupKey: string,
+    changedStrings: Array<{ key: string; value: string }>,
+    contextStrings: Array<{ key: string; value: string }>,
+  ): Promise<Array<{ key: string; value: string }>> {
+    if (changedStrings.length === 0) return changedStrings
+    await this.isModelReady
+
+    const changedInput = Object.fromEntries(
+      changedStrings.map(({ key, value }) => [key, value]),
+    )
+
+    let prompt =
+      'You are a professional translator who is going to be asked to translate a JSON object containing related text strings. '
+
+    if (this.languageInstructions) {
+      prompt += `\n\nYou are following these language-specific guidelines:\n${this.languageInstructions}`
+    }
+
+    prompt += `\n\nThese strings belong to the "${groupKey}" section/page of an application. Ensure consistency in terminology and style across all strings in this group.`
+
+    prompt += `\n\nYou MUST translate ALL values without exception. Do not skip any values, including slugs or identifiers while being mindfull of words typically borrowed from other languages. Keep it how it is common to do in ${this.options.targetLang}`
+
+    if (!this.options.retranslate) {
+      prompt += ` However, if a value appears to already be translated into ${this.options.targetLang}, keep it as-is.`
+    }
+
+    if (contextStrings.length > 0) {
+      const contextInput = Object.fromEntries(
+        contextStrings.map(({ key, value }) => [key, value]),
+      )
+      prompt += `\n\nAlready translated (for context, do not retranslate):\n${JSON.stringify(contextInput, null, 2)}`
+    }
+
+    prompt += `\n\nYou maintain the original JSON structure exactly. You respond with valid JSON only, no additional text or explanation.`
+
+    prompt += `\n\nTranslate the following JSON from ${this.options.sourceLang} to ${this.options.targetLang}:\n\n${JSON.stringify(changedInput, null, 2)}`
+
+    const response = await this.llm.generate(prompt, {
+      temperature: this.options.temperature,
+    })
+
+    return this.parseGroupResponse(response.content, changedStrings)
+  }
+
   private constructGroupPrompt(groupKey: string, jsonInput: Record<string, string>): string {
     let prompt =
       'You are a professional translator who is going to be asked to translate a JSON object containing related text strings. '
@@ -164,10 +204,7 @@ export class Translator {
         value: parsed[key] ?? originalStrings.find((s) => s.key === key)?.value ?? '',
       }))
     } catch {
-      console.warn(
-        'Failed to parse group translation response as JSON, falling back to individual translations',
-      )
-      return originalStrings
+      throw new Error(`Failed to parse group translation response as JSON: ${cleaned.slice(0, 100)}`)
     }
   }
 }

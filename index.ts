@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { Command } from 'commander'
-import { translate } from './src/translate'
+import { orchestrate } from './src/orchestrate'
 import type { Config } from './src/types'
 import { loadConfig } from './src/util/config'
 import pkg from './package.json' assert { type: 'json' }
@@ -23,9 +23,11 @@ program
   .option('-l, --target-langs <langs>', 'Target language codes (comma-separated)', (value) =>
     value.split(','),
   )
-  .option('-p, --provider <provider>', 'LLM provider (openai, ollama, mistral)')
+  .option('-p, --provider <provider>', 'LLM provider (openai, ollama, mistral, or any OpenAI-compatible)')
   .option('-k, --api-key <key>', 'API key for LLM provider')
+  .option('-b, --base-url <url>', 'Base URL for OpenAI-compatible API')
   .option('-i, --instructions-dir <path>', 'Directory containing language instruction files')
+  .option('-n, --concurrency <number>', 'Max concurrent LLM calls (default 5)', parseInt)
   .option('-v, --verbose', 'Enable verbose output for debugging')
   .option('-r, --retranslate', 'Force retranslation of all values, even if already translated')
   .action(async (options) => {
@@ -36,11 +38,10 @@ program
       temperature: options.temperature ?? passedConfig.temperature ?? 0.0,
       sourceLang: options.sourceLang || passedConfig.sourceLang || 'en',
       targetLangs: options.targetLangs || passedConfig.targetLangs || ['es'],
-      provider: (options.provider || passedConfig.provider || 'mistral') as
-        | 'openai'
-        | 'ollama'
-        | 'mistral',
+      provider: options.provider || passedConfig.provider || 'mistral',
       apiKey: options.apiKey || passedConfig.apiKey,
+      baseUrl: options.baseUrl || passedConfig.baseUrl,
+      concurrency: options.concurrency ?? passedConfig.concurrency,
       verbose: options.verbose || passedConfig.verbose || false,
       instructionsDir: options.instructionsDir || passedConfig.instructionsDir,
       files: passedConfig.files,
@@ -49,31 +50,15 @@ program
     }
 
     if (!config.files && !config.database) {
-      console.error('Error: No translation sources configured.')
-      console.error('Add "files" or "database" to your config file.')
+      process.stderr.write('Error: No translation sources configured.\n')
+      process.stderr.write('Add "files" or "database" to your config file.\n')
       process.exit(1)
     }
 
-    console.log(`Speranto v${pkg.version}`)
-    console.log(
-      `Starting translation from ${config.sourceLang} to ${config.targetLangs.join(
-        ', ',
-      )} using model ${config.model}`,
-    )
-
-    if (config.files) {
-      console.log(`Files: ${config.files.sourceDir} -> ${config.files.targetDir}`)
-    }
-    if (config.database) {
-      console.log(
-        `Database: ${config.database.type} (${config.database.tables.length} tables)`,
-      )
-    }
-
     try {
-      await translate(config)
+      await orchestrate(config, pkg.version)
     } catch (error) {
-      console.error('Error during translation:', error)
+      process.stderr.write(`Error: ${error instanceof Error ? error.message : error}\n`)
       process.exit(1)
     }
   })

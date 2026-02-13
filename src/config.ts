@@ -78,10 +78,14 @@ export interface Config {
   sourceLang: string
   /** Target language codes */
   targetLangs: string[]
-  /** LLM provider */
-  provider: 'openai' | 'ollama' | 'mistral'
+  /** LLM provider (openai, mistral, ollama, or any OpenAI-compatible) */
+  provider: string
   /** API key for the LLM provider */
   apiKey?: string
+  /** Base URL for OpenAI-compatible API (overrides provider default) */
+  baseUrl?: string
+  /** Maximum concurrent LLM calls (default 5, use 1 for sequential) */
+  concurrency?: number
   /** Enable verbose output */
   verbose?: boolean
   /** Directory containing language-specific instruction files */
@@ -92,6 +96,4 @@ export interface Config {
   database?: DatabaseConfig
   /** Force retranslation of all values, even if already translated */
   retranslate?: boolean
-  /** Process all translations sequentially (no concurrency) */
-  sequential?: boolean
 }

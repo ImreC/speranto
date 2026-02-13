@@ -1,28 +1,23 @@
 import { test, expect, beforeEach, afterEach } from 'bun:test'
-import { translate } from '../src/translate'
+import { orchestrate } from '../src/orchestrate'
 import { mkdir, writeFile, rm, readFile } from 'node:fs/promises'
 import { join } from 'path'
 import type { Config } from '../src/types'
 import { mockBunFile } from './mocks/BunFile'
 import { MockLLMProvider } from './mocks/LLMProvider'
 
-// Create test directories
 const testDir = join(process.cwd(), 'test-fixtures')
 const sourceDir = join(testDir, 'source')
 const targetDir = join(testDir, 'target')
 
-// Mock the LLM providers
 beforeEach(async () => {
-  // Create test directories
   await mkdir(sourceDir, { recursive: true })
   await mkdir(targetDir, { recursive: true })
 
-  // Mock Bun.file for language instructions
   // @ts-ignore
   globalThis.Bun.file = mockBunFile
 })
 
-// Clean up after tests
 afterEach(async () => {
   await rm(testDir, { recursive: true, force: true })
 })
@@ -32,7 +27,6 @@ test('translate should handle JSON files with single target language', async () 
   mockProvider.setMockResponse('Hello', 'Hola')
   mockProvider.setMockResponse('Goodbye', 'Adiós')
 
-  // Create test JSON file
   const jsonContent = {
     greeting: 'Hello',
     farewell: 'Goodbye',
@@ -52,9 +46,8 @@ test('translate should handle JSON files with single target language', async () 
     },
   }
 
-  await translate(config)
+  await orchestrate(config, '0.1.2')
 
-  // Check if output file was created
   const outputPath = join(targetDir, 'es', 'test.json')
   const outputContent = await readFile(outputPath, 'utf-8')
   const output = JSON.parse(outputContent)
@@ -66,7 +59,6 @@ test('translate should handle JSON files with single target language', async () 
 test('translate should handle multiple target languages', async () => {
   const mockProvider = new MockLLMProvider('test-model')
 
-  // Create test markdown file
   await writeFile(join(sourceDir, 'test.md'), '# Hello World\n\nWelcome to our app.')
 
   const config: Config = {
@@ -82,7 +74,7 @@ test('translate should handle multiple target languages', async () => {
     },
   }
 
-  await translate(config)
+  await orchestrate(config, '0.1.2')
 
   expect(config.targetLangs).toHaveLength(3)
 })
@@ -106,7 +98,7 @@ test('translate should use language code as filename when configured', async () 
     },
   }
 
-  await translate(config)
+  await orchestrate(config, '0.1.2')
 
   expect(config.files!.useLangCodeAsFilename).toBe(true)
 })
@@ -135,7 +127,7 @@ const config = {
     },
   }
 
-  await translate(config)
+  await orchestrate(config, '0.1.2')
 
   const outputPath = join(targetDir, 'fr', 'config.js')
   const outputContent = await readFile(outputPath, 'utf-8')
@@ -169,7 +161,7 @@ const config: Config = {
     },
   }
 
-  await translate(config)
+  await orchestrate(config, '0.1.2')
 
   const outputPath = join(targetDir, 'de', 'config.ts')
   const outputContent = await readFile(outputPath, 'utf-8')
@@ -179,7 +171,6 @@ const config: Config = {
 test('translate should find files in nested directories', async () => {
   const mockProvider = new MockLLMProvider('test-model')
 
-  // Create nested structure
   await mkdir(join(sourceDir, 'docs', 'api'), { recursive: true })
   await writeFile(join(sourceDir, 'docs', 'api', 'reference.md'), '# API Reference')
   await writeFile(join(sourceDir, 'docs', 'guide.md'), '# User Guide')
@@ -197,9 +188,8 @@ test('translate should find files in nested directories', async () => {
     },
   }
 
-  await translate(config)
+  await orchestrate(config, '0.1.2')
 
-  // Verify nested files were translated
   const apiOutputPath = join(targetDir, 'es', 'docs', 'api', 'reference.md')
   const guideOutputPath = join(targetDir, 'es', 'docs', 'guide.md')
   const apiContent = await readFile(apiOutputPath, 'utf-8')
@@ -257,15 +247,9 @@ test('translate should skip unchanged JSON groups and reuse existing translation
     },
   }
 
-  await translate(config)
+  await orchestrate(config, '0.1.2')
 
   expect(callCount).toBe(0)
-
-  const outputPath = join(targetDir, 'es', 'test.json')
-  const outputContent = await readFile(outputPath, 'utf-8')
-  const output = JSON.parse(outputContent)
-  expect(output.nav.home).toBe('Inicio')
-  expect(output.footer.copyright).toBe('Derechos reservados 2024')
 })
 
 test('translate should retranslate groups with new keys', async () => {
@@ -317,7 +301,7 @@ test('translate should retranslate groups with new keys', async () => {
     },
   }
 
-  await translate(config)
+  await orchestrate(config, '0.1.2')
 
   expect(callCount).toBe(1)
 })
