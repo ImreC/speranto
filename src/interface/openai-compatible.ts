@@ -7,12 +7,21 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   ollama: 'http://localhost:11434/v1',
 }
 
+const INITIAL_RETRY_DELAY_MS = 60_000
+const MAX_RETRIES = 5
+
+export interface RateLimitHandler {
+  onRateLimit(retryIn: number, attempt: number): void
+}
+
 export class OpenAICompatibleProvider extends LLMInterface {
   private client: OpenAI
+  private consecutiveRateLimits = 0
+  private rateLimitHandler?: RateLimitHandler
 
   constructor(
     model: string,
-    options: { apiKey?: string; baseUrl?: string; provider?: string } = {},
+    options: { apiKey?: string; baseUrl?: string; provider?: string; rateLimitHandler?: RateLimitHandler } = {},
   ) {
     super(model)
 
@@ -30,31 +39,49 @@ export class OpenAICompatibleProvider extends LLMInterface {
       )
     }
 
-    this.client = new OpenAI({ apiKey: apiKey || '', baseURL })
+    this.client = new OpenAI({ apiKey: apiKey || '', baseURL, maxRetries: 0 })
+    this.rateLimitHandler = options.rateLimitHandler
   }
 
   async generate(prompt: string, options?: LLMGenerateOptions): Promise<LLMResponse> {
-    const completion = await this.client.chat.completions.create({
-      model: this.model,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: options?.temperature ?? 0.7,
-      max_tokens: options?.maxTokens,
-      top_p: options?.topP,
-    })
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const completion = await this.client.chat.completions.create({
+          model: this.model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: options?.temperature ?? 0.7,
+          max_tokens: options?.maxTokens,
+          top_p: options?.topP,
+        })
 
-    const choice = completion.choices[0]
-    return {
-      content: choice?.message.content || '',
-      model: completion.model,
-      finishReason: choice?.finish_reason || undefined,
-      usage: completion.usage
-        ? {
-            promptTokens: completion.usage.prompt_tokens,
-            completionTokens: completion.usage.completion_tokens,
-            totalTokens: completion.usage.total_tokens,
-          }
-        : undefined,
+        this.consecutiveRateLimits = 0
+
+        const choice = completion.choices[0]
+        return {
+          content: choice?.message.content || '',
+          model: completion.model,
+          finishReason: choice?.finish_reason || undefined,
+          usage: completion.usage
+            ? {
+                promptTokens: completion.usage.prompt_tokens,
+                completionTokens: completion.usage.completion_tokens,
+                totalTokens: completion.usage.total_tokens,
+              }
+            : undefined,
+        }
+      } catch (err) {
+        if (err instanceof OpenAI.RateLimitError && attempt < MAX_RETRIES) {
+          this.consecutiveRateLimits++
+          const delay = INITIAL_RETRY_DELAY_MS * this.consecutiveRateLimits
+          this.rateLimitHandler?.onRateLimit(delay, this.consecutiveRateLimits)
+          await sleep(delay)
+          continue
+        }
+        throw err
+      }
     }
+
+    throw new Error('Unreachable')
   }
 
   async isModelLoaded(): Promise<boolean> {
@@ -65,4 +92,8 @@ export class OpenAICompatibleProvider extends LLMInterface {
       return true
     }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
