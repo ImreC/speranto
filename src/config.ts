@@ -15,6 +15,8 @@ export interface TableConfig {
   columns: string[]
   /** Primary key column (defaults to 'id') */
   idColumn?: string
+  /** Source language column for row-level language detection */
+  langColumn?: string
 }
 
 /**

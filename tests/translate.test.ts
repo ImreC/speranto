@@ -218,21 +218,52 @@ test('translate should skip unchanged JSON groups and reuse existing translation
     },
   }
   await writeFile(join(sourceDir, 'test.json'), JSON.stringify(jsonContent, null, 2))
+  mockProvider.setMockResponse('Home', 'Inicio')
+  mockProvider.setMockResponse('About', 'Acerca de')
+  mockProvider.setMockResponse('Copyright 2024', 'Derechos reservados 2024')
 
-  const existingTranslation = {
-    nav: {
-      home: 'Inicio',
-      about: 'Acerca de',
-    },
-    footer: {
-      copyright: 'Derechos reservados 2024',
+  const config: Config = {
+    model: 'test-model',
+    temperature: 0.7,
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
     },
   }
-  await mkdir(join(targetDir, 'es'), { recursive: true })
-  await writeFile(
-    join(targetDir, 'es', 'test.json'),
-    JSON.stringify(existingTranslation, null, 2),
-  )
+
+  await orchestrate(config, '0.1.2')
+  callCount = 0
+  await orchestrate(config, '0.1.2')
+
+  expect(callCount).toBe(0)
+})
+
+test('translate should retranslate groups with new keys', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  let callCount = 0
+  const originalGenerate = mockProvider.generate.bind(mockProvider)
+  mockProvider.generate = async (...args) => {
+    callCount++
+    return originalGenerate(...args)
+  }
+
+  const initialJsonContent = {
+    nav: {
+      home: 'Home',
+      about: 'About',
+    },
+    footer: {
+      copyright: 'Copyright 2024',
+    },
+  }
+  await writeFile(join(sourceDir, 'test.json'), JSON.stringify(initialJsonContent, null, 2))
+  mockProvider.setMockResponse('Home', 'Inicio')
+  mockProvider.setMockResponse('About', 'Acerca de')
+  mockProvider.setMockResponse('Copyright 2024', 'Derechos reservados 2024')
 
   const config: Config = {
     model: 'test-model',
@@ -249,18 +280,6 @@ test('translate should skip unchanged JSON groups and reuse existing translation
 
   await orchestrate(config, '0.1.2')
 
-  expect(callCount).toBe(0)
-})
-
-test('translate should retranslate groups with new keys', async () => {
-  const mockProvider = new MockLLMProvider('test-model')
-  let callCount = 0
-  const originalGenerate = mockProvider.generate.bind(mockProvider)
-  mockProvider.generate = async (...args) => {
-    callCount++
-    return originalGenerate(...args)
-  }
-
   const jsonContent = {
     nav: {
       home: 'Home',
@@ -272,34 +291,7 @@ test('translate should retranslate groups with new keys', async () => {
     },
   }
   await writeFile(join(sourceDir, 'test.json'), JSON.stringify(jsonContent, null, 2))
-
-  const existingTranslation = {
-    nav: {
-      home: 'Inicio',
-      about: 'Acerca de',
-    },
-    footer: {
-      copyright: 'Derechos reservados 2024',
-    },
-  }
-  await mkdir(join(targetDir, 'es'), { recursive: true })
-  await writeFile(
-    join(targetDir, 'es', 'test.json'),
-    JSON.stringify(existingTranslation, null, 2),
-  )
-
-  const config: Config = {
-    model: 'test-model',
-    temperature: 0.7,
-    sourceLang: 'en',
-    targetLangs: ['es'],
-    provider: 'mistral',
-    llm: mockProvider,
-    files: {
-      sourceDir,
-      targetDir: join(targetDir, '[lang]'),
-    },
-  }
+  callCount = 0
 
   await orchestrate(config, '0.1.2')
 

@@ -18,13 +18,22 @@ Use Bun instead of Node.js for all tooling:
 bun install
 
 # Run all tests
-bun test
+bun run test
+
+# Run SQLite database tests
+bun run test:sqlite
+
+# Run PostgreSQL database tests (starts Docker if needed)
+bun run test:postgres
+
+# Run all database tests
+bun run test:db
 
 # Run a single test file
-bun test tests/translator.test.ts
+LLM_API_KEY=test bun test tests/translator.test.ts
 
 # Run tests matching a pattern
-bun test --filter "parseJSON"
+LLM_API_KEY=test bun test --filter "parseJSON"
 
 # Build the package (uses tsdown)
 bun run build
@@ -33,8 +42,10 @@ bun run build
 tsc --noEmit
 ```
 
-Note: Tests require `LLM_API_KEY=test` environment variable, but `bun test` script sets this
-automatically via package.json.
+Note: Tests require `LLM_API_KEY=test`. The package script sets this automatically for
+`bun run test`; for direct `bun test ...` invocations, set it manually.
+`bun run test:postgres` ensures the PostgreSQL test container from `tests/docker-compose.yml` is
+running before executing the Postgres test file.
 
 ## Code Style
 
@@ -67,6 +78,9 @@ Order imports as follows:
 2. External packages
 3. Internal modules (relative paths)
 4. Type-only imports (use `type` keyword)
+
+For built-ins, prefer the `node:` prefix in new code. Some existing files still use bare imports
+like `path`.
 
 ```typescript
 import { readFile, writeFile } from 'node:fs/promises'
@@ -181,8 +195,8 @@ real API calls in tests.
 index.ts              # CLI entry point (Commander.js)
 src/
 ├── config.ts         # Configuration types (exported to consumers)
-├── translate.ts      # Main file translation orchestration
-├── translate-database.ts  # Database translation orchestration
+├── orchestrate.ts    # Main file/database orchestration
+├── orchestrate-database.ts  # Database translation orchestration
 ├── translator.ts     # Core Translator class (prompt construction, LLM calls)
 ├── types.ts          # Extended Config type for internal use
 ├── database/
@@ -193,15 +207,15 @@ src/
 ├── interface/
 │   ├── llm.interface.ts  # Abstract LLMInterface base class
 │   ├── index.ts      # Provider exports
-│   ├── openai.ts     # OpenAI provider
-│   ├── mistral.ts    # Mistral provider
-│   └── ollama.ts     # Ollama provider
+│   └── openai-compatible.ts  # OpenAI-compatible provider for OpenAI/Mistral/Ollama/custom APIs
 ├── parsers/
 │   ├── json.ts       # JSON file parser
 │   ├── js.ts         # JS/TS parser (Babel)
 │   └── md.ts         # Markdown parser (Remark)
 └── util/
-    └── config.ts     # Config file loading utility
+    ├── config.ts     # Config file loading utility
+    ├── hash.ts       # Shared row/group hash helpers
+    └── file-state.ts # Sidecar file translation state
 tests/
 ├── mocks/
 │   ├── LLMProvider.ts    # Mock LLM provider
@@ -221,11 +235,17 @@ tests/
 
 ## Architecture Notes
 
-- `LLMInterface` is the abstract base class for all LLM providers (generate, isModelLoaded)
+- `LLMInterface` is the abstract base class for LLM providers (`generate`, `isModelLoaded`)
+- `OpenAICompatibleProvider` handles OpenAI, Mistral, Ollama, and arbitrary OpenAI-compatible
+  endpoints
 - `DatabaseAdapter` is the abstract base class for database backends
 - Parsers extract translatable strings and reconstruct files after translation
 - Translation is orchestrated via Listr2 for progress display
-- Change detection avoids retranslating unchanged content (override with `retranslate: true`)
-- `sequential` mode processes translations one at a time (for low rate-limit setups)
+- Database translations store base-language rows in translation tables, making them the canonical
+  read model for all languages
+- Database change detection uses row-level and per-field hashes
+- File translation state is stored in a sidecar `.speranto/` directory and uses hash-based
+  file/group/chunk detection
+- Set `concurrency: 1` to process translations sequentially on low rate-limit setups
 - Default provider is `mistral` with model `mistral-large-latest`
 - CLI options override config file values; config loaded from `speranto.config.ts` or `.js`

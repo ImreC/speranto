@@ -60,6 +60,27 @@ test('sqlite - getSourceRows returns all rows with specified columns', async () 
   expect(rows[1]?.columns.title).toBe('Second Post')
 })
 
+test('sqlite - getSourceRows includes langColumn when configured', async () => {
+  await adapter.close()
+
+  const db = new Database(TEST_DB)
+  db.run(`ALTER TABLE articles ADD COLUMN lang TEXT DEFAULT 'en'`)
+  db.run(`UPDATE articles SET lang = 'nl' WHERE id = 2`)
+  db.close()
+
+  adapter = new SQLiteAdapter(TEST_DB)
+  await adapter.connect()
+
+  const rows = await adapter.getSourceRows({
+    name: 'articles',
+    columns: ['title', 'body'],
+    langColumn: 'lang',
+  })
+
+  expect(rows[0]?.sourceLang).toBe('en')
+  expect(rows[1]?.sourceLang).toBe('nl')
+})
+
 test('sqlite - ensureTranslationTable creates translation table', async () => {
   await adapter.ensureTranslationTable(articlesTable, '_translations')
 
@@ -82,14 +103,24 @@ test('sqlite - upsertTranslation inserts new translation', async () => {
     {
       sourceId: 1,
       lang: 'es',
+      sourceLang: 'en',
+      rowSourceHash: 'row-hash-1',
+      fieldSourceHashes: {
+        title: 'title-hash-1',
+        body: 'body-hash-1',
+      },
       columns: { title: 'Hola Mundo', body: 'Este es el cuerpo.' },
     },
     '_translations',
   )
 
-  const translatedIds = await adapter.getTranslatedIds(articlesTable, 'es', '_translations')
-  expect(translatedIds.has('1')).toBe(true)
-  expect(translatedIds.size).toBe(1)
+  const translations = await adapter.getTranslations(articlesTable, '_translations')
+  expect(translations).toHaveLength(1)
+  expect(translations[0]?.sourceId).toBe('1')
+  expect(translations[0]?.lang).toBe('es')
+  expect(translations[0]?.sourceLang).toBe('en')
+  expect(translations[0]?.rowSourceHash).toBe('row-hash-1')
+  expect(translations[0]?.fieldSourceHashes.title).toBe('title-hash-1')
 })
 
 test('sqlite - upsertTranslation updates existing translation', async () => {
@@ -100,6 +131,12 @@ test('sqlite - upsertTranslation updates existing translation', async () => {
     {
       sourceId: 1,
       lang: 'es',
+      sourceLang: 'en',
+      rowSourceHash: 'row-hash-1',
+      fieldSourceHashes: {
+        title: 'title-hash-1',
+        body: 'body-hash-1',
+      },
       columns: { title: 'Hola Mundo', body: 'Este es el cuerpo.' },
     },
     '_translations',
@@ -110,19 +147,26 @@ test('sqlite - upsertTranslation updates existing translation', async () => {
     {
       sourceId: 1,
       lang: 'es',
+      sourceLang: 'en',
+      rowSourceHash: 'row-hash-2',
+      fieldSourceHashes: {
+        title: 'title-hash-2',
+        body: 'body-hash-2',
+      },
       columns: { title: 'Hola Mundo Actualizado', body: 'Cuerpo actualizado.' },
     },
     '_translations',
   )
 
-  const translatedIds = await adapter.getTranslatedIds(articlesTable, 'es', '_translations')
-  expect(translatedIds.has('1')).toBe(true)
-  expect(translatedIds.size).toBe(1)
+  const translations = await adapter.getTranslations(articlesTable, '_translations')
+  expect(translations).toHaveLength(1)
+  expect(translations[0]?.rowSourceHash).toBe('row-hash-2')
+  expect(translations[0]?.columns.title).toBe('Hola Mundo Actualizado')
 })
 
-test('sqlite - getTranslatedIds returns empty set for non-existent translations', async () => {
+test('sqlite - getTranslations returns empty list for non-existent translations', async () => {
   await adapter.ensureTranslationTable(articlesTable, '_translations')
 
-  const translatedIds = await adapter.getTranslatedIds(articlesTable, 'fr', '_translations')
-  expect(translatedIds.size).toBe(0)
+  const translations = await adapter.getTranslations(articlesTable, '_translations')
+  expect(translations).toHaveLength(0)
 })

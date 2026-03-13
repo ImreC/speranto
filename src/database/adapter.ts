@@ -3,13 +3,19 @@ import type { TableConfig } from '../types'
 export interface SourceRow {
   id: string | number
   columns: Record<string, string>
+  sourceLang?: string
 }
 
 export interface TranslationRow {
   sourceId: string | number
   lang: string
+  sourceLang: string
+  rowSourceHash: string
+  fieldSourceHashes: Record<string, string>
   columns: Record<string, string>
 }
+
+export interface StoredTranslationRow extends TranslationRow {}
 
 export abstract class DatabaseAdapter {
   abstract connect(): Promise<void>
@@ -19,11 +25,10 @@ export abstract class DatabaseAdapter {
 
   abstract getSourceRows(table: TableConfig): Promise<SourceRow[]>
 
-  abstract getTranslatedIds(
+  abstract getTranslations(
     table: TableConfig,
-    lang: string,
     suffix: string,
-  ): Promise<Set<string>>
+  ): Promise<StoredTranslationRow[]>
 
   abstract upsertTranslation(
     table: TableConfig,

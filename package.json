@@ -32,7 +32,11 @@
     "types": "tsc src/types.ts --declaration --emitDeclarationOnly --outDir dist",
     "build": "tsdown",
     "link": "bun run build && bun link",
-    "test": "LLM_API_KEY=test bun test"
+    "test": "LLM_API_KEY=test bun test",
+    "test:sqlite": "LLM_API_KEY=test bun test tests/database/sqlite.test.ts",
+    "test:postgres": "sh ./scripts/test-postgres.sh",
+    "test:db": "bun run test:sqlite && bun run test:postgres",
+    "test:db:down": "docker compose -f tests/docker-compose.yml down"
   },
   "devDependencies": {
     "@types/babel__generator": "^7.27.0",

@@ -1,4 +1,9 @@
-export { DatabaseAdapter, type SourceRow, type TranslationRow } from './adapter'
+export {
+  DatabaseAdapter,
+  type SourceRow,
+  type TranslationRow,
+  type StoredTranslationRow,
+} from './adapter'
 export { SQLiteAdapter } from './sqlite'
 export { PostgresAdapter } from './postgres'
 

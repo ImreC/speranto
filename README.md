@@ -100,6 +100,10 @@ module.exports = config
 | `useLangCodeAsFilename` | `boolean` | Use language code as filename (e.g., `en.json` → `es.json`) |
 | `maxStringsPerGroup` | `number` | Maximum strings per translation batch (helps with large files) |
 
+Speranto keeps file translation state in a sidecar `.speranto/` directory so it can use
+hash-based change detection. That lets it skip unchanged files quickly and only retranslate changed
+groups/chunks on later runs.
+
 ### Language-Specific Instructions
 
 You can provide custom translation instructions for each target language by creating markdown files in an instructions directory:
@@ -179,6 +183,7 @@ const config: Config = {
         name: 'articles',
         columns: ['title', 'body', 'summary'],
         idColumn: 'id',  // optional, defaults to 'id'
+        langColumn: 'lang',  // optional, use row language instead of global sourceLang
       },
       {
         name: 'products',
@@ -229,6 +234,7 @@ const config: Config = {
 | `schema` | `string` | Schema name (PostgreSQL only, default: `'public'`) |
 | `columns` | `string[]` | Array of column names to translate |
 | `idColumn` | `string` | Primary key column (default: `'id'`) |
+| `langColumn` | `string` | Optional source-language column for row-level language detection |
 
 ### How It Works
 
@@ -238,12 +244,51 @@ For each source table, Speranto creates a translation table (e.g., `articles_tra
 |--------|-------------|
 | `id` | Auto-incrementing primary key |
 | `source_id` | Reference to the source row |
-| `lang` | Target language code |
-| `<column>` | Translated content for each specified column |
+| `lang` | Language code for the stored row, including the base/source language |
+| `source_lang` | Source language used to generate this row |
+| `row_source_hash` | Hash of the current source content for fast skip checks |
+| `field_source_hashes` | JSON map of per-field hashes for partial retranslations |
+| `<column>` | Stored content for each specified column |
 | `created_at` | Timestamp of creation |
 | `updated_at` | Timestamp of last update |
 
-Translations are upserted, so running the command multiple times will update existing translations rather than creating duplicates.
+The translation table is now the canonical read model for all languages. Speranto upserts the
+base/source language row into that table as well as translated rows, so consumers can query a
+single table regardless of language.
+
+Database change detection is hash-based:
+- a row-level hash skips unchanged rows quickly
+- per-field hashes allow Speranto to retranslate only changed fields instead of the full row
+
+If `langColumn` is configured, Speranto uses the row value as the source language for that record;
+otherwise it falls back to the global `sourceLang`.
+
+### Database Test Commands
+
+The SQLite database tests can be run directly:
+
+```bash
+bun run test:sqlite
+```
+
+The PostgreSQL database tests are wrapped in a helper script that ensures the Docker container from
+`tests/docker-compose.yml` is up and healthy before running the test file:
+
+```bash
+bun run test:postgres
+```
+
+To run both database suites:
+
+```bash
+bun run test:db
+```
+
+To stop the PostgreSQL test container afterward:
+
+```bash
+bun run test:db:down
+```
 
 ## Combining Files and Database
 

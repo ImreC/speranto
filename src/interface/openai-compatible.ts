@@ -25,10 +25,9 @@ export class OpenAICompatibleProvider extends LLMInterface {
   ) {
     super(model)
 
-    const baseURL =
-      options.baseUrl ??
-      (options.provider ? PROVIDER_BASE_URLS[options.provider] : undefined) ??
-      PROVIDER_BASE_URLS.openai
+    const defaultBaseURL = PROVIDER_BASE_URLS.openai || 'https://api.openai.com/v1'
+    const providerBaseURL = options.provider ? PROVIDER_BASE_URLS[options.provider] : undefined
+    const baseURL = options.baseUrl ?? providerBaseURL ?? defaultBaseURL
 
     const isOllama = baseURL.includes('localhost:11434') || baseURL.includes('127.0.0.1:11434')
     const apiKey = isOllama ? 'ollama' : (options.apiKey || process.env.LLM_API_KEY)

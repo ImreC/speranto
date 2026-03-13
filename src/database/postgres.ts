@@ -1,5 +1,10 @@
 import pg from 'pg'
-import { DatabaseAdapter, type SourceRow, type TranslationRow } from './adapter'
+import {
+  DatabaseAdapter,
+  type SourceRow,
+  type StoredTranslationRow,
+  type TranslationRow,
+} from './adapter'
 import type { TableConfig } from '../types'
 
 const DEFAULT_SCHEMA = 'public'
@@ -45,18 +50,36 @@ export class PostgresAdapter extends DatabaseAdapter {
     if (!this.client) throw new Error('Database not connected')
 
     const translationTable = this.getQualifiedTableName(table, suffix)
-    const columnDefs = table.columns.map((col) => `"${col}" TEXT`).join(', ')
+    const columnDefs = [
+      'id SERIAL PRIMARY KEY',
+      'source_id TEXT NOT NULL',
+      'lang TEXT NOT NULL',
+      "source_lang TEXT NOT NULL DEFAULT ''",
+      "row_source_hash TEXT NOT NULL DEFAULT ''",
+      "field_source_hashes TEXT NOT NULL DEFAULT '{}'",
+      ...table.columns.map((col) => `"${col}" TEXT`),
+      'created_at TIMESTAMPTZ DEFAULT NOW()',
+      'updated_at TIMESTAMPTZ DEFAULT NOW()',
+      'UNIQUE(source_id, lang)',
+    ].join(',\n        ')
 
     await this.client.query(`
       CREATE TABLE IF NOT EXISTS ${translationTable} (
-        id SERIAL PRIMARY KEY,
-        source_id TEXT NOT NULL,
-        lang TEXT NOT NULL,
-        ${columnDefs},
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE(source_id, lang)
+        ${columnDefs}
       )
+    `)
+
+    await this.client.query(`
+      ALTER TABLE ${translationTable}
+      ADD COLUMN IF NOT EXISTS source_lang TEXT NOT NULL DEFAULT ''
+    `)
+    await this.client.query(`
+      ALTER TABLE ${translationTable}
+      ADD COLUMN IF NOT EXISTS row_source_hash TEXT NOT NULL DEFAULT ''
+    `)
+    await this.client.query(`
+      ALTER TABLE ${translationTable}
+      ADD COLUMN IF NOT EXISTS field_source_hashes TEXT NOT NULL DEFAULT '{}'
     `)
 
     const indexName = this.getIndexName(table, suffix)
@@ -70,12 +93,16 @@ export class PostgresAdapter extends DatabaseAdapter {
     if (!this.client) throw new Error('Database not connected')
 
     const idColumn = table.idColumn || 'id'
-    const selectColumns = [idColumn, ...table.columns].map((c) => `"${c}"`).join(', ')
+    const selectColumns = [
+      idColumn,
+      ...table.columns,
+      ...(table.langColumn ? [table.langColumn] : []),
+    ]
+      .map((c) => `"${c}"`)
+      .join(', ')
     const qualifiedTable = this.getQualifiedTableName(table)
 
-    const result = await this.client.query(
-      `SELECT ${selectColumns} FROM ${qualifiedTable}`,
-    )
+    const result = await this.client.query(`SELECT ${selectColumns} FROM ${qualifiedTable}`)
     const rows = result.rows as Record<string, unknown>[]
 
     return rows.map((row) => ({
@@ -85,27 +112,41 @@ export class PostgresAdapter extends DatabaseAdapter {
         acc[col] = value != null ? String(value) : ''
         return acc
       }, {} as Record<string, string>),
+      sourceLang:
+        table.langColumn && row[table.langColumn] != null
+          ? String(row[table.langColumn])
+          : undefined,
     }))
   }
 
-  async getTranslatedIds(
-    table: TableConfig,
-    lang: string,
-    suffix: string,
-  ): Promise<Set<string>> {
+  async getTranslations(table: TableConfig, suffix: string): Promise<StoredTranslationRow[]> {
     if (!this.client) throw new Error('Database not connected')
 
     const translationTable = this.getQualifiedTableName(table, suffix)
+    const quotedColumns = table.columns.map((c) => `"${c}"`).join(', ')
+    const selectColumns = quotedColumns ? `, ${quotedColumns}` : ''
 
     try {
       const result = await this.client.query(
-        `SELECT source_id FROM ${translationTable} WHERE lang = $1`,
-        [lang],
+        `SELECT source_id, lang, source_lang, row_source_hash, field_source_hashes${selectColumns}
+         FROM ${translationTable}`,
       )
-      const rows = result.rows as { source_id: string }[]
-      return new Set(rows.map((r) => r.source_id))
+      const rows = result.rows as Record<string, unknown>[]
+
+      return rows.map((row) => ({
+        sourceId: row.source_id as string,
+        lang: String(row.lang ?? ''),
+        sourceLang: String(row.source_lang ?? ''),
+        rowSourceHash: String(row.row_source_hash ?? ''),
+        fieldSourceHashes: parseFieldHashes(row.field_source_hashes),
+        columns: table.columns.reduce((acc, col) => {
+          const value = row[col]
+          acc[col] = value != null ? String(value) : ''
+          return acc
+        }, {} as Record<string, string>),
+      }))
     } catch {
-      return new Set()
+      return []
     }
   }
 
@@ -118,25 +159,54 @@ export class PostgresAdapter extends DatabaseAdapter {
 
     const translationTable = this.getQualifiedTableName(table, suffix)
     const columnNames = Object.keys(translation.columns)
-    const quotedColumns = columnNames.map((c) => `"${c}"`).join(', ')
-    const placeholders = columnNames.map((_, i) => `$${i + 3}`).join(', ')
-    const updateSet = columnNames.map((col) => `"${col}" = EXCLUDED."${col}"`).join(', ')
+    const insertColumns = [
+      'source_id',
+      'lang',
+      'source_lang',
+      'row_source_hash',
+      'field_source_hashes',
+      ...columnNames,
+    ]
+    const quotedColumns = insertColumns.map((c) => `"${c}"`).join(', ')
+    const placeholders = insertColumns.map((_, i) => `$${i + 1}`).join(', ')
+    const updateSet = [
+      '"source_lang" = EXCLUDED."source_lang"',
+      '"row_source_hash" = EXCLUDED."row_source_hash"',
+      '"field_source_hashes" = EXCLUDED."field_source_hashes"',
+      ...columnNames.map((col) => `"${col}" = EXCLUDED."${col}"`),
+    ].join(', ')
 
     const values = [
       String(translation.sourceId),
       translation.lang,
+      translation.sourceLang,
+      translation.rowSourceHash,
+      JSON.stringify(translation.fieldSourceHashes),
       ...columnNames.map((col) => translation.columns[col]),
     ]
 
     await this.client.query(
       `
-      INSERT INTO ${translationTable} (source_id, lang, ${quotedColumns}, updated_at)
-      VALUES ($1, $2, ${placeholders}, NOW())
+      INSERT INTO ${translationTable} (${quotedColumns}, updated_at)
+      VALUES (${placeholders}, NOW())
       ON CONFLICT(source_id, lang) DO UPDATE SET
         ${updateSet},
         updated_at = NOW()
     `,
       values,
     )
+  }
+}
+
+function parseFieldHashes(value: unknown): Record<string, string> {
+  if (typeof value !== 'string' || !value) {
+    return {}
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Record<string, string>
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
   }
 }

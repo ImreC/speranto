@@ -33,6 +33,7 @@ const config: Config = {
   //       schema: 'public',
   //       columns: ['title', 'body', 'summary'],
   //       idColumn: 'id',
+  //       langColumn: 'lang',
   //     },
   //     {
   //       name: 'products',

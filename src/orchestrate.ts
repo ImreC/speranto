@@ -10,7 +10,6 @@ import {
   extractTranslatableGroups,
   reconstructJSON,
   splitLargeGroups,
-  type TranslatableGroup,
   type SplitGroup,
 } from './parsers/json'
 import {
@@ -18,12 +17,16 @@ import {
   extractTranslatableGroupsJS,
   reconstructJS,
   splitLargeGroupsJS,
-  type TranslatableJSGroup,
   type SplitJSGroup,
 } from './parsers/js'
 import { Translator } from './translator'
-import { detectChanges } from './change-detection'
 import { orchestrateDatabase } from './orchestrate-database'
+import {
+  FileStateStore,
+  type StoredFileGroupState,
+  type StoredMarkdownChunkState,
+} from './util/file-state'
+import { createContentHash, createHashMetadata, type HashEntry } from './util/hash'
 import type { Config, FileConfig } from './types'
 import type { Root, BlockContent } from 'mdast'
 
@@ -119,8 +122,10 @@ async function translateLanguage(
     instructionsDir: config.instructionsDir,
     retranslate: config.retranslate,
   })
+  const stateStore = new FileStateStore(getFileStateRoot(config), targetLang)
+  await stateStore.load()
 
-  const workItems = await collectFileWorkItems(allFiles, config, targetLang)
+  const workItems = await collectFileWorkItems(allFiles, config, targetLang, stateStore)
 
   if (workItems.length === 0) {
     langTask.skip('nothing changed')
@@ -165,6 +170,7 @@ async function translateLanguage(
               await write()
             }
           }
+          await stateStore.save()
         },
       },
     ],
@@ -181,6 +187,7 @@ async function collectFileWorkItems(
   allFiles: string[],
   config: FileTranslateConfig,
   targetLang: string,
+  stateStore: FileStateStore,
 ): Promise<WorkItem[]> {
   const workItems: WorkItem[] = []
 
@@ -188,18 +195,28 @@ async function collectFileWorkItems(
     const ext = extname(filePath)
 
     if (ext === '.md') {
-      const items = await collectMarkdownWorkItems(filePath, config, targetLang)
+      const items = await collectMarkdownWorkItems(filePath, config, targetLang, stateStore)
       workItems.push(...items)
     } else if (ext === '.json') {
-      const items = await collectJSONWorkItems(filePath, config, targetLang)
+      const items = await collectJSONWorkItems(filePath, config, targetLang, stateStore)
       workItems.push(...items)
     } else if (ext === '.js' || ext === '.ts') {
-      const items = await collectJSWorkItems(filePath, config, targetLang, ext === '.ts')
+      const items = await collectJSWorkItems(
+        filePath,
+        config,
+        targetLang,
+        ext === '.ts',
+        stateStore,
+      )
       workItems.push(...items)
     }
   }
 
   return workItems
+}
+
+function getFileStateRoot(config: FileTranslateConfig): string {
+  return join(dirname(config.files.sourceDir), '.speranto')
 }
 
 function getTargetPath(config: FileTranslateConfig, filePath: string, targetLang: string): string {
@@ -228,54 +245,152 @@ async function collectMarkdownWorkItems(
   filePath: string,
   config: FileTranslateConfig,
   targetLang: string,
+  stateStore: FileStateStore,
 ): Promise<WorkItem[]> {
   const relativePath = relative(config.files.sourceDir, filePath)
   const content = await readFile(filePath, 'utf-8')
+  const targetPath = getTargetPath(config, filePath, targetLang)
+  const sourceFileHash = createContentHash(content)
+  const existingState = !config.retranslate ? stateStore.get(relativePath) : undefined
+
+  if (existingState?.fileHash === sourceFileHash && existsSync(targetPath)) {
+    return []
+  }
+
   const tree = await parseMarkdown(content)
   const chunks = await getTranslatableChunks(tree)
 
   if (chunks.length === 0) return []
 
-  return chunks.map((chunk, i) => ({
-    label: `${relativePath} chunk ${i + 1}/${chunks.length}`,
-    execute: async (translator: Translator) => {
-      const translatedText = await translator.translateChunk(chunk)
-      return {
-        filePath,
-        write: async () => {
-          const freshContent = await readFile(filePath, 'utf-8')
-          const freshTree = await parseMarkdown(freshContent)
-          const translatedTree: Root = JSON.parse(JSON.stringify(freshTree))
-          const translatedNodes = await parseMarkdown(translatedText)
+  const translatedChunks = new Map<string, string>()
+  const nextChunkStates: Record<string, StoredMarkdownChunkState> = {}
+  const workItems: WorkItem[] = []
 
-          let nodeIndex = 0
-          for (
-            let j = chunk.startIndex;
-            j <= chunk.endIndex && j < translatedTree.children.length;
-            j++
-          ) {
-            if (nodeIndex < translatedNodes.children.length) {
-              translatedTree.children[j] = translatedNodes.children[nodeIndex] as BlockContent
-              nodeIndex++
+  for (const [index, chunk] of chunks.entries()) {
+    const chunkId = getMarkdownChunkStateId(index)
+    const hashMetadata = createHashMetadata([{ key: 'text', value: chunk.text }], config.sourceLang)
+    const previousChunkState = existingState?.chunks?.[chunkId]
+
+    if (previousChunkState?.rowHash === hashMetadata.rowHash) {
+      translatedChunks.set(chunkId, previousChunkState.translatedText)
+      nextChunkStates[chunkId] = previousChunkState
+      continue
+    }
+
+    workItems.push({
+      label: `${relativePath} chunk ${index + 1}/${chunks.length}`,
+      execute: async (translator: Translator) => {
+        const translatedText = await translator.translateChunk(chunk)
+        translatedChunks.set(chunkId, translatedText)
+        nextChunkStates[chunkId] = {
+          rowHash: hashMetadata.rowHash,
+          translatedText,
+        }
+
+        return {
+          filePath,
+          write: async () => {
+            const translatedTree: Root = JSON.parse(JSON.stringify(tree))
+
+            for (const [currentIndex, currentChunk] of chunks.entries()) {
+              const currentChunkId = getMarkdownChunkStateId(currentIndex)
+              const translatedChunkText =
+                translatedChunks.get(currentChunkId) ?? currentChunk.text
+              const translatedNodes = await parseMarkdown(translatedChunkText)
+
+              let nodeIndex = 0
+              for (
+                let j = currentChunk.startIndex;
+                j <= currentChunk.endIndex && j < translatedTree.children.length;
+                j++
+              ) {
+                if (nodeIndex < translatedNodes.children.length) {
+                  translatedTree.children[j] =
+                    translatedNodes.children[nodeIndex] as BlockContent
+                  nodeIndex++
+                }
+              }
             }
-          }
 
-          let translatedContent = await stringifyMarkdown(translatedTree)
-          translatedContent += `\n\n_Translated automatically with ${config.model}. The original content was written in ${config.sourceLang}. Please allow for minor errors._`
-          await writeOutput(config, filePath, translatedContent, targetLang)
+            let translatedContent = await stringifyMarkdown(translatedTree)
+            translatedContent += `\n\n_Translated automatically with ${config.model}. The original content was written in ${config.sourceLang}. Please allow for minor errors._`
+            await writeOutput(config, filePath, translatedContent, targetLang)
+            stateStore.set(relativePath, {
+              fileHash: sourceFileHash,
+              format: 'md',
+              chunks: nextChunkStates,
+            })
+          },
+        }
+      },
+    })
+  }
+
+  if (workItems.length === 0) {
+    if (!existsSync(targetPath)) {
+      return [
+        {
+          label: `${relativePath} restore`,
+          execute: async () => ({
+            filePath,
+            write: async () => {
+              const translatedTree: Root = JSON.parse(JSON.stringify(tree))
+
+              for (const [index, chunk] of chunks.entries()) {
+                const chunkId = getMarkdownChunkStateId(index)
+                const translatedChunkText = translatedChunks.get(chunkId) ?? chunk.text
+                const translatedNodes = await parseMarkdown(translatedChunkText)
+
+                let nodeIndex = 0
+                for (
+                  let j = chunk.startIndex;
+                  j <= chunk.endIndex && j < translatedTree.children.length;
+                  j++
+                ) {
+                  if (nodeIndex < translatedNodes.children.length) {
+                    translatedTree.children[j] =
+                      translatedNodes.children[nodeIndex] as BlockContent
+                    nodeIndex++
+                  }
+                }
+              }
+
+              let translatedContent = await stringifyMarkdown(translatedTree)
+              translatedContent += `\n\n_Translated automatically with ${config.model}. The original content was written in ${config.sourceLang}. Please allow for minor errors._`
+              await writeOutput(config, filePath, translatedContent, targetLang)
+              stateStore.set(relativePath, {
+                fileHash: sourceFileHash,
+                format: 'md',
+                chunks: nextChunkStates,
+              })
+            },
+          }),
         },
-      }
-    },
-  }))
+      ]
+    }
+
+    return []
+  }
+
+  return workItems
 }
 
 async function collectJSONWorkItems(
   filePath: string,
   config: FileTranslateConfig,
   targetLang: string,
+  stateStore: FileStateStore,
 ): Promise<WorkItem[]> {
   const relativePath = relative(config.files.sourceDir, filePath)
   const content = await readFile(filePath, 'utf-8')
+  const targetPath = getTargetPath(config, filePath, targetLang)
+  const sourceFileHash = createContentHash(content)
+  const existingState = !config.retranslate ? stateStore.get(relativePath) : undefined
+
+  if (existingState?.fileHash === sourceFileHash && existsSync(targetPath)) {
+    return []
+  }
+
   const jsonData = await parseJSON(content)
   const groups = await extractTranslatableGroups(jsonData)
 
@@ -285,70 +400,77 @@ async function collectJSONWorkItems(
 
   const allGroups = splitGroups.flatMap((sg) => sg.subgroups || [sg.group])
 
-  const targetPath = getTargetPath(config, filePath, targetLang)
-  const existingTranslations = new Map<string, string>()
-
-  if (existsSync(targetPath) && !config.retranslate) {
-    try {
-      const existingContent = await readFile(targetPath, 'utf-8')
-      const existingJSON = await parseJSON(existingContent)
-      const rawExistingGroups = await extractTranslatableGroups(existingJSON)
-
-      const splitExistingGroups: SplitGroup[] = config.files.maxStringsPerGroup
-        ? splitLargeGroups(rawExistingGroups, config.files.maxStringsPerGroup)
-        : rawExistingGroups.map((group) => ({ group }))
-      const existingGroups = splitExistingGroups.flatMap((sg) => sg.subgroups || [sg.group])
-
-      for (const group of existingGroups) {
-        for (const str of group.strings) {
-          existingTranslations.set(str.path.join('.'), str.value)
-        }
-      }
-    } catch {
-      // Could not parse existing, will retranslate all
-    }
-  }
-
   const workItems: WorkItem[] = []
   const allTranslatedStrings: Array<{ path: string[]; value: string }> = []
-  let hasWorkItems = false
+  const nextGroupStates: Record<string, StoredFileGroupState> = {}
 
   for (const group of allGroups) {
-    const sourceStrings = group.strings.map((str) => ({
+    const sourceStrings: HashEntry[] = group.strings.map((str) => ({
       key: str.path.join('.'),
       value: str.value,
     }))
+    const groupId = getFileGroupStateId(group.groupKey, sourceStrings.map((str) => str.key))
+    const hashMetadata = createHashMetadata(sourceStrings, config.sourceLang)
+    const previousGroupState = existingState?.groups?.[groupId]
 
-    const { changed, context } = detectChanges(sourceStrings, existingTranslations)
-
-    if (changed.length === 0) {
+    if (previousGroupState?.rowHash === hashMetadata.rowHash) {
+      nextGroupStates[groupId] = previousGroupState
       for (const str of group.strings) {
         allTranslatedStrings.push({
           path: str.path,
-          value: existingTranslations.get(str.path.join('.')) ?? str.value,
+          value: previousGroupState.translations[str.path.join('.')] ?? str.value,
         })
       }
       continue
     }
 
-    hasWorkItems = true
+    const preparedGroup = prepareGroupedTranslations(
+      sourceStrings,
+      hashMetadata.fieldHashes,
+      previousGroupState,
+    )
+
+    if (preparedGroup.changed.length === 0) {
+      nextGroupStates[groupId] = {
+        rowHash: hashMetadata.rowHash,
+        fieldHashes: hashMetadata.fieldHashes,
+        translations: preparedGroup.translations,
+      }
+      for (const str of group.strings) {
+        allTranslatedStrings.push({
+          path: str.path,
+          value: preparedGroup.translations[str.path.join('.')] ?? str.value,
+        })
+      }
+      continue
+    }
+
     workItems.push({
       label: `${relativePath} "${group.groupKey}"`,
       execute: async (translator: Translator) => {
         const translatedChanged = await translator.translateGroupWithContext(
           group.groupKey,
-          changed,
-          context,
+          preparedGroup.changed,
+          preparedGroup.context,
         )
 
         const translatedMap = new Map(translatedChanged.map((s) => [s.key, s.value]))
-        const contextMap = new Map(context.map((s) => [s.key, s.value]))
+        const translations = { ...preparedGroup.translations }
 
         for (const str of group.strings) {
           const key = str.path.join('.')
-          const translatedValue =
-            translatedMap.get(key) ?? contextMap.get(key) ?? str.value
-          allTranslatedStrings.push({ path: str.path, value: translatedValue })
+          const translatedValue = translatedMap.get(key) ?? translations[key] ?? str.value
+          translations[key] = translatedValue
+          allTranslatedStrings.push({
+            path: str.path,
+            value: translatedValue,
+          })
+        }
+
+        nextGroupStates[groupId] = {
+          rowHash: hashMetadata.rowHash,
+          fieldHashes: hashMetadata.fieldHashes,
+          translations,
         }
 
         return {
@@ -357,13 +479,39 @@ async function collectJSONWorkItems(
             const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
             const translatedContent = await stringifyJSON(translatedJSON)
             await writeOutput(config, filePath, translatedContent, targetLang)
+            stateStore.set(relativePath, {
+              fileHash: sourceFileHash,
+              format: 'json',
+              groups: nextGroupStates,
+            })
           },
         }
       },
     })
   }
 
-  if (!hasWorkItems && allTranslatedStrings.length > 0) {
+  if (workItems.length === 0 && allTranslatedStrings.length > 0) {
+    if (!existsSync(targetPath)) {
+      return [
+        {
+          label: `${relativePath} restore`,
+          execute: async () => ({
+            filePath,
+            write: async () => {
+              const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
+              const translatedContent = await stringifyJSON(translatedJSON)
+              await writeOutput(config, filePath, translatedContent, targetLang)
+              stateStore.set(relativePath, {
+                fileHash: sourceFileHash,
+                format: 'json',
+                groups: nextGroupStates,
+              })
+            },
+          }),
+        },
+      ]
+    }
+
     return []
   }
 
@@ -375,9 +523,18 @@ async function collectJSWorkItems(
   config: FileTranslateConfig,
   targetLang: string,
   isTypeScript: boolean,
+  stateStore: FileStateStore,
 ): Promise<WorkItem[]> {
   const relativePath = relative(config.files.sourceDir, filePath)
   const content = await readFile(filePath, 'utf-8')
+  const targetPath = getTargetPath(config, filePath, targetLang)
+  const sourceFileHash = createContentHash(content)
+  const existingState = !config.retranslate ? stateStore.get(relativePath) : undefined
+
+  if (existingState?.fileHash === sourceFileHash && existsSync(targetPath)) {
+    return []
+  }
+
   const ast = await parseJS(content, isTypeScript)
   const groups = await extractTranslatableGroupsJS(ast)
 
@@ -387,89 +544,156 @@ async function collectJSWorkItems(
 
   const allGroups = splitGroups.flatMap((sg) => sg.subgroups || [sg.group])
 
-  const targetPath = getTargetPath(config, filePath, targetLang)
-  const existingTranslations = new Map<string, string>()
-
-  if (existsSync(targetPath) && !config.retranslate) {
-    try {
-      const existingContent = await readFile(targetPath, 'utf-8')
-      const existingAST = await parseJS(existingContent, isTypeScript)
-      const rawExistingGroups = await extractTranslatableGroupsJS(existingAST)
-
-      const splitExistingGroups: SplitJSGroup[] = config.files.maxStringsPerGroup
-        ? splitLargeGroupsJS(rawExistingGroups, config.files.maxStringsPerGroup)
-        : rawExistingGroups.map((group) => ({ group }))
-      const existingGroups = splitExistingGroups.flatMap((sg) => sg.subgroups || [sg.group])
-
-      for (const group of existingGroups) {
-        for (const str of group.strings) {
-          existingTranslations.set(str.objectPath.join('.') || str.path, str.value)
-        }
-      }
-    } catch {
-      // Could not parse existing, will retranslate all
-    }
-  }
-
   const workItems: WorkItem[] = []
   const allTranslatedStrings: Array<{ path: string; value: string }> = []
-  let hasWorkItems = false
+  const nextGroupStates: Record<string, StoredFileGroupState> = {}
 
   for (const group of allGroups) {
-    const sourceStrings = group.strings.map((str) => ({
+    const sourceStrings: HashEntry[] = group.strings.map((str) => ({
       key: str.objectPath.join('.') || str.path,
       value: str.value,
     }))
+    const groupId = getFileGroupStateId(group.groupKey, sourceStrings.map((str) => str.key))
+    const hashMetadata = createHashMetadata(sourceStrings, config.sourceLang)
+    const previousGroupState = existingState?.groups?.[groupId]
 
-    const { changed, context } = detectChanges(sourceStrings, existingTranslations)
-
-    if (changed.length === 0) {
+    if (previousGroupState?.rowHash === hashMetadata.rowHash) {
+      nextGroupStates[groupId] = previousGroupState
       for (const str of group.strings) {
         const key = str.objectPath.join('.') || str.path
         allTranslatedStrings.push({
           path: str.path,
-          value: existingTranslations.get(key) ?? str.value,
+          value: previousGroupState.translations[key] ?? str.value,
         })
       }
       continue
     }
 
-    hasWorkItems = true
+    const preparedGroup = prepareGroupedTranslations(
+      sourceStrings,
+      hashMetadata.fieldHashes,
+      previousGroupState,
+    )
+
+    if (preparedGroup.changed.length === 0) {
+      nextGroupStates[groupId] = {
+        rowHash: hashMetadata.rowHash,
+        fieldHashes: hashMetadata.fieldHashes,
+        translations: preparedGroup.translations,
+      }
+      for (const str of group.strings) {
+        const key = str.objectPath.join('.') || str.path
+        allTranslatedStrings.push({
+          path: str.path,
+          value: preparedGroup.translations[key] ?? str.value,
+        })
+      }
+      continue
+    }
+
     workItems.push({
       label: `${relativePath} "${group.groupKey}"`,
       execute: async (translator: Translator) => {
         const translatedChanged = await translator.translateGroupWithContext(
           group.groupKey,
-          changed,
-          context,
+          preparedGroup.changed,
+          preparedGroup.context,
         )
 
         const translatedMap = new Map(translatedChanged.map((s) => [s.key, s.value]))
-        const contextMap = new Map(context.map((s) => [s.key, s.value]))
+        const translations = { ...preparedGroup.translations }
 
         for (const str of group.strings) {
           const key = str.objectPath.join('.') || str.path
-          const translatedValue =
-            translatedMap.get(key) ?? contextMap.get(key) ?? str.value
+          const translatedValue = translatedMap.get(key) ?? translations[key] ?? str.value
+          translations[key] = translatedValue
           allTranslatedStrings.push({ path: str.path, value: translatedValue })
+        }
+
+        nextGroupStates[groupId] = {
+          rowHash: hashMetadata.rowHash,
+          fieldHashes: hashMetadata.fieldHashes,
+          translations,
         }
 
         return {
           filePath,
           write: async () => {
-            const freshContent = await readFile(filePath, 'utf-8')
-            const freshAST = await parseJS(freshContent, isTypeScript)
+            const freshAST = await parseJS(content, isTypeScript)
             const translatedContent = await reconstructJS(freshAST, allTranslatedStrings)
             await writeOutput(config, filePath, translatedContent, targetLang)
+            stateStore.set(relativePath, {
+              fileHash: sourceFileHash,
+              format: 'js',
+              groups: nextGroupStates,
+            })
           },
         }
       },
     })
   }
 
-  if (!hasWorkItems && allTranslatedStrings.length > 0) {
+  if (workItems.length === 0 && allTranslatedStrings.length > 0) {
+    if (!existsSync(targetPath)) {
+      return [
+        {
+          label: `${relativePath} restore`,
+          execute: async () => ({
+            filePath,
+            write: async () => {
+              const freshAST = await parseJS(content, isTypeScript)
+              const translatedContent = await reconstructJS(freshAST, allTranslatedStrings)
+              await writeOutput(config, filePath, translatedContent, targetLang)
+              stateStore.set(relativePath, {
+                fileHash: sourceFileHash,
+                format: 'js',
+                groups: nextGroupStates,
+              })
+            },
+          }),
+        },
+      ]
+    }
+
     return []
   }
 
   return workItems
+}
+
+function getFileGroupStateId(groupKey: string, keys: string[]): string {
+  return `${groupKey}::${keys.join('|')}`
+}
+
+function getMarkdownChunkStateId(index: number): string {
+  return `chunk_${index}`
+}
+
+function prepareGroupedTranslations(
+  sourceStrings: HashEntry[],
+  fieldHashes: Record<string, string>,
+  previousGroupState?: StoredFileGroupState,
+): {
+  changed: HashEntry[]
+  context: HashEntry[]
+  translations: Record<string, string>
+} {
+  const changed: HashEntry[] = []
+  const context: HashEntry[] = []
+  const translations: Record<string, string> = {}
+
+  for (const { key, value } of sourceStrings) {
+    const existingHash = previousGroupState?.fieldHashes[key]
+    const existingTranslation = previousGroupState?.translations[key]
+
+    if (existingHash === fieldHashes[key] && existingTranslation !== undefined) {
+      context.push({ key, value: existingTranslation })
+      translations[key] = existingTranslation
+      continue
+    }
+
+    changed.push({ key, value })
+  }
+
+  return { changed, context, translations }
 }
