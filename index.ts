@@ -55,6 +55,11 @@ program
       process.exit(1)
     }
 
+    console.log(`Speranto v${pkg.version}`)
+    console.log(
+      `Translating from ${config.sourceLang} to ${config.targetLangs.join(', ')} using ${config.model}`,
+    )
+
     try {
       await orchestrate(config, pkg.version)
     } catch (error) {
