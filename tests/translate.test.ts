@@ -1,6 +1,7 @@
 import { test, expect, beforeEach, afterEach } from 'bun:test'
 import { orchestrate } from '../src/orchestrate'
 import { mkdir, writeFile, rm, readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'path'
 import type { Config } from '../src/types'
 import { mockBunFile } from './mocks/BunFile'
@@ -294,6 +295,138 @@ test('translate should retranslate groups with new keys', async () => {
   callCount = 0
 
   await orchestrate(config, '0.1.2')
+
+  expect(callCount).toBe(1)
+})
+
+test('translate should restore markdown output from sidecar state without retranslating', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  let callCount = 0
+  const originalGenerate = mockProvider.generate.bind(mockProvider)
+  mockProvider.generate = async (...args) => {
+    callCount++
+    return originalGenerate(...args)
+  }
+  mockProvider.setMockResponse('# Hello World\n\nWelcome to our app.', '# Hola Mundo\n\nBienvenido a nuestra app.')
+
+  await writeFile(join(sourceDir, 'test.md'), '# Hello World\n\nWelcome to our app.')
+
+  const config: Config = {
+    model: 'test-model',
+    temperature: 0.5,
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
+  }
+
+  await orchestrate(config, '0.1.2')
+
+  await rm(join(targetDir, 'es', 'test.md'))
+  callCount = 0
+
+  await orchestrate(config, '0.1.2')
+
+  expect(callCount).toBe(0)
+  expect(existsSync(join(targetDir, 'es', 'test.md'))).toBe(true)
+})
+
+test('translate should only retranslate changed JavaScript groups', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  let callCount = 0
+  const originalGenerate = mockProvider.generate.bind(mockProvider)
+  mockProvider.generate = async (...args) => {
+    callCount++
+    return originalGenerate(...args)
+  }
+  mockProvider.setMockResponse('Home', 'Inicio')
+  mockProvider.setMockResponse('About', 'Acerca de')
+  mockProvider.setMockResponse('Copyright 2024', 'Derechos reservados 2024')
+  mockProvider.setMockResponse('About Us', 'Sobre Nosotros')
+
+  const jsContent = `
+const messages = {
+  nav: {
+    home: "Home",
+    about: "About"
+  },
+  footer: {
+    copyright: "Copyright 2024"
+  }
+}
+`
+  await writeFile(join(sourceDir, 'messages.js'), jsContent)
+
+  const config: Config = {
+    model: 'test-model',
+    temperature: 0.7,
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
+  }
+
+  await orchestrate(config, '0.1.2')
+
+  const updatedJsContent = `
+const messages = {
+  nav: {
+    home: "Home",
+    about: "About Us"
+  },
+  footer: {
+    copyright: "Copyright 2024"
+  }
+}
+`
+  await writeFile(join(sourceDir, 'messages.js'), updatedJsContent)
+  callCount = 0
+
+  await orchestrate(config, '0.1.2')
+
+  const outputContent = await readFile(join(targetDir, 'es', 'messages.js'), 'utf-8')
+  expect(callCount).toBe(1)
+  expect(outputContent).toContain('Sobre Nosotros')
+  expect(outputContent).toContain('Derechos reservados 2024')
+})
+
+test('translate should respect retranslate=true for unchanged files', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  let callCount = 0
+  const originalGenerate = mockProvider.generate.bind(mockProvider)
+  mockProvider.generate = async (...args) => {
+    callCount++
+    return originalGenerate(...args)
+  }
+  mockProvider.setMockResponse('Hello', 'Hola')
+
+  await writeFile(join(sourceDir, 'test.json'), JSON.stringify({ greeting: 'Hello' }, null, 2))
+
+  const baseConfig: Config = {
+    model: 'test-model',
+    temperature: 0.7,
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
+  }
+
+  await orchestrate(baseConfig, '0.1.2')
+
+  callCount = 0
+  await orchestrate({ ...baseConfig, retranslate: true }, '0.1.2')
 
   expect(callCount).toBe(1)
 })

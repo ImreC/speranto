@@ -1,6 +1,6 @@
 {
   "name": "@speranto/speranto",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "license": "MIT",
   "author": "Imre Gelens",
   "homepage": "https://github.com/ImreC/speranto",
@@ -8,7 +8,7 @@
     "type": "git",
     "url": "https://github.com/ImreC/speranto"
   },
-  "description": "A quick and simple machine translation tool for i18n in webapps",
+  "description": "A quick and simple machine translation tool for i18n in webapps. Translate JSON, JS/TS, Markdown files and database content using OpenAI, Mistral, or Ollama.",
   "main": "dist/index.mjs",
   "types": "dist/index.d.mts",
   "module": "dist/index.mjs",
@@ -32,11 +32,16 @@
     "types": "tsc src/types.ts --declaration --emitDeclarationOnly --outDir dist",
     "build": "tsdown",
     "link": "bun run build && bun link",
+    "sync:version": "bun run scripts/version.ts sync",
+    "bump:version": "bun run scripts/version.ts",
+    "bump:patch": "bun run scripts/version.ts patch",
+    "bump:minor": "bun run scripts/version.ts minor",
+    "bump:major": "bun run scripts/version.ts major",
     "test": "LLM_API_KEY=test bun test",
     "test:sqlite": "LLM_API_KEY=test bun test tests/database/sqlite.test.ts",
-    "test:postgres": "sh ./scripts/test-postgres.sh",
+    "test:postgres": "bun run tests/postgres-test-runner.ts",
     "test:db": "bun run test:sqlite && bun run test:postgres",
-    "test:db:down": "docker compose -f tests/docker-compose.yml down"
+    "test:db:down": "bun run tests/postgres-test-runner.ts down"
   },
   "devDependencies": {
     "@types/babel__generator": "^7.27.0",

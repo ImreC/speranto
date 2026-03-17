@@ -44,8 +44,9 @@ tsc --noEmit
 
 Note: Tests require `LLM_API_KEY=test`. The package script sets this automatically for
 `bun run test`; for direct `bun test ...` invocations, set it manually.
-`bun run test:postgres` ensures the PostgreSQL test container from `tests/docker-compose.yml` is
-running before executing the Postgres test file.
+`bun run test:postgres` uses the integrated runner in `tests/postgres-test-runner.ts` to ensure the
+PostgreSQL test container from `tests/docker-compose.yml` is running before executing the Postgres
+test file.
 
 ## Code Style
 
@@ -230,6 +231,7 @@ tests/
 ├── translator.test.ts
 ├── translate.test.ts
 ├── providers.test.ts
+├── postgres-test-runner.ts   # Docker-backed PostgreSQL test runner
 └── docker-compose.yml    # PostgreSQL for database tests
 ```
 

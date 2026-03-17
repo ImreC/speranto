@@ -206,6 +206,7 @@ async function syncTranslatedRow(
     targetLang,
     hashMetadata.fieldHashes,
     existing,
+    config.retranslate ?? false,
   )
 
   if (translatedColumns.changed.length > 0) {
@@ -239,6 +240,7 @@ function buildTranslatedColumns(
   targetLang: string,
   fieldHashes: Record<string, string>,
   existing: StoredTranslationRow | undefined,
+  retranslate: boolean,
 ): {
   changed: HashEntry[]
   context: HashEntry[]
@@ -247,7 +249,7 @@ function buildTranslatedColumns(
   const changed: HashEntry[] = []
   const context: HashEntry[] = []
   const columns: Record<string, string> = {}
-  const canReuseExisting = existing && existing.sourceLang === sourceLang
+  const canReuseExisting = !retranslate && existing && existing.sourceLang === sourceLang
 
   for (const [key, value] of Object.entries(sourceColumns)) {
     const isBlank = !value.trim()

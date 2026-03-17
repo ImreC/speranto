@@ -14,12 +14,43 @@ pnpm add @speranto/speranto
 bun add @speranto/speranto
 ```
 
-Also available on [JSR](https://jsr.io/@speranto/speranto):
+Configuration types are also available on [JSR](https://jsr.io/@speranto/speranto):
 
 ```bash
 npx jsr add @speranto/speranto
 # or
 deno add jsr:@speranto/speranto
+```
+
+```typescript
+import type { Config } from '@speranto/speranto'
+```
+
+## Development
+
+### Versioning
+
+Keep `package.json` as the source of truth. The sync step updates shared package metadata in
+`jsr.json` (`name`, `version`, `license`, `description`) while leaving JSR-specific fields like
+`exports` and `publish` intact:
+
+```bash
+bun run bump:version patch
+bun run bump:version minor
+bun run bump:version major
+```
+
+You can also create prereleases or set an explicit version:
+
+```bash
+bun run bump:version prerelease beta
+bun run bump:version 1.0.0
+```
+
+If `package.json` was edited manually, resync `jsr.json` with:
+
+```bash
+bun run sync:version
 ```
 
 ## Usage
@@ -271,8 +302,9 @@ The SQLite database tests can be run directly:
 bun run test:sqlite
 ```
 
-The PostgreSQL database tests are wrapped in a helper script that ensures the Docker container from
-`tests/docker-compose.yml` is up and healthy before running the test file:
+The PostgreSQL database tests are wrapped in an integrated test runner at
+`tests/postgres-test-runner.ts`. It ensures the Docker container from `tests/docker-compose.yml` is
+up and healthy before running the test file:
 
 ```bash
 bun run test:postgres
