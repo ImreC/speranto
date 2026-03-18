@@ -75,7 +75,6 @@ import type { Config } from '@speranto/speranto'
 
 const config: Config = {
   model: 'gpt-4o-mini',
-  temperature: 0.0,
   sourceLang: 'en',
   targetLangs: ['es', 'fr', 'de', 'it'],
   provider: 'openai',
@@ -95,7 +94,6 @@ export default config
 // speranto.config.js
 const config = {
   model: 'mistral-large-latest',
-  temperature: 0.0,
   sourceLang: 'en',
   targetLangs: ['nl'],
   provider: 'mistral',
@@ -115,11 +113,15 @@ module.exports = config
 | Option | Type | Description |
 |--------|------|-------------|
 | `model` | `string` | The AI model to use for translation |
-| `temperature` | `number` | Temperature setting for the AI model (0.0 - 1.0) |
 | `sourceLang` | `string` | Source language code (e.g., `'en'` for English) |
 | `targetLangs` | `string[]` | Array of target language codes |
-| `provider` | `string` | LLM provider: `'openai'`, `'ollama'`, or `'mistral'` |
+| `provider` | `string` | LLM provider: `'openai'`, `'ollama'`, `'mistral'`, or any OpenAI-compatible |
 | `apiKey` | `string` | API key for the LLM provider |
+| `baseUrl` | `string` | Base URL for OpenAI-compatible APIs (overrides provider default) |
+| `concurrency` | `number` | Maximum concurrent LLM calls (default: `5`) |
+| `timeout` | `number` | Request timeout in milliseconds (default: `600000` / 10 minutes) |
+| `retranslate` | `boolean` | Force retranslation of all values, even if already translated |
+| `init` | `boolean` | Build state from existing translations without translating |
 | `instructionsDir` | `string` | Directory containing language-specific instruction files (see below) |
 
 #### File Translation Options (`files`)
@@ -130,6 +132,7 @@ module.exports = config
 | `targetDir` | `string` | Output directory pattern (use `[lang]` as placeholder) |
 | `useLangCodeAsFilename` | `boolean` | Use language code as filename (e.g., `en.json` → `es.json`) |
 | `maxStringsPerGroup` | `number` | Maximum strings per translation batch (helps with large files) |
+| `excludeKeys` | `string[]` | Field names to exclude from translation (matched against leaf keys) |
 
 Speranto keeps file translation state in a sidecar `.speranto/` directory so it can use
 hash-based change detection. That lets it skip unchanged files quickly and only retranslate changed
@@ -176,17 +179,29 @@ speranto --config ./custom-config.js
 # Override specific options
 speranto --model gpt-4o-mini --source-lang en --target-langs es,fr,de
 
+# Use a custom OpenAI-compatible provider
+speranto --provider custom --base-url https://my-llm.example.com/v1
+
+# Force retranslation of all values
+speranto --retranslate
+
+# Build state from existing translations without translating
+speranto --init
+
 # All available options
 speranto \
-  --config <path>              # Path to config file (default: ./speranto.config.ts)
-  --model <model>              # Model to use for translation
-  --temperature <number>       # Temperature for translation (0.0-1.0)
-  --source-lang <lang>         # Source language code
-  --target-langs <langs>       # Target language codes (comma-separated)
-  --provider <provider>        # LLM provider (openai, ollama, mistral)
-  --api-key <key>              # API key for LLM provider
-  --instructions-dir <path>    # Directory containing language instruction files
-  --verbose                    # Enable verbose output for debugging
+  -c, --config <path>              # Path to config file (default: ./speranto.config.ts)
+  -m, --model <model>              # Model to use for translation
+  -s, --source-lang <lang>         # Source language code
+  -l, --target-langs <langs>       # Target language codes (comma-separated)
+  -p, --provider <provider>        # LLM provider (openai, ollama, mistral, or any OpenAI-compatible)
+  -k, --api-key <key>              # API key for LLM provider
+  -b, --base-url <url>             # Base URL for OpenAI-compatible API
+  -i, --instructions-dir <path>    # Directory containing language instruction files
+  -n, --concurrency <number>       # Max concurrent LLM calls (default 5)
+  -v, --verbose                    # Enable verbose output for debugging
+  -r, --retranslate                # Force retranslation of all values
+  --init                           # Build state from existing translations
 ```
 
 ## Database Translation
@@ -201,7 +216,6 @@ import type { Config } from '@speranto/speranto'
 
 const config: Config = {
   model: 'gpt-4o-mini',
-  temperature: 0.0,
   sourceLang: 'en',
   targetLangs: ['es', 'fr', 'de'],
   provider: 'openai',
