@@ -245,6 +245,124 @@ test('sqlite db - orchestrate only retranslates changed fields', async () => {
   expect(row.body).toBe('Este es el cuerpo.')
 })
 
+test('sqlite db - orchestrate skips unchanged rows entirely', async () => {
+  const db = new Database(dbPath)
+  db.run(`
+    CREATE TABLE articles (
+      id INTEGER PRIMARY KEY,
+      title TEXT,
+      body TEXT
+    )
+  `)
+  db.run(`INSERT INTO articles (title, body) VALUES ('Hello World', 'This is the body.')`)
+  db.run(`INSERT INTO articles (title, body) VALUES ('Second Post', 'Another body here.')`)
+  db.close()
+
+  const mockProvider = new MockLLMProvider('test-model')
+  let callCount = 0
+  const originalGenerate = mockProvider.generate.bind(mockProvider)
+  mockProvider.generate = async (...args) => {
+    callCount++
+    return originalGenerate(...args)
+  }
+  mockProvider.setMockResponse('Hello World', 'Hola Mundo')
+  mockProvider.setMockResponse('This is the body.', 'Este es el cuerpo.')
+  mockProvider.setMockResponse('Second Post', 'Segundo Post')
+  mockProvider.setMockResponse('Another body here.', 'Otro cuerpo aqui.')
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    database: {
+      type: 'sqlite',
+      connection: dbPath,
+      tables: [
+        {
+          name: 'articles',
+          columns: ['title', 'body'],
+        },
+      ],
+    },
+  }
+
+  await orchestrate(config, '0.1.2')
+  expect(callCount).toBeGreaterThan(0)
+
+  callCount = 0
+  await orchestrate(config, '0.1.2')
+
+  expect(callCount).toBe(0)
+
+  const readDb = new Database(dbPath, { readonly: true })
+  const rows = readDb
+    .query(
+      'SELECT source_id, lang, title, body FROM articles_translations WHERE lang = \'es\' ORDER BY source_id',
+    )
+    .all() as Array<{
+      source_id: string
+      lang: string
+      title: string
+      body: string
+    }>
+  readDb.close()
+
+  expect(rows).toHaveLength(2)
+  expect(rows[0]?.title).toBe('Hola Mundo')
+  expect(rows[1]?.title).toBe('Segundo Post')
+})
+
+test('sqlite db - orchestrate does not create duplicate translation rows', async () => {
+  const db = new Database(dbPath)
+  db.run(`
+    CREATE TABLE articles (
+      id INTEGER PRIMARY KEY,
+      title TEXT,
+      body TEXT
+    )
+  `)
+  db.run(`INSERT INTO articles (title, body) VALUES ('Hello World', 'This is the body.')`)
+  db.close()
+
+  const mockProvider = new MockLLMProvider('test-model')
+  mockProvider.setMockResponse('Hello World', 'Hola Mundo')
+  mockProvider.setMockResponse('This is the body.', 'Este es el cuerpo.')
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    database: {
+      type: 'sqlite',
+      connection: dbPath,
+      tables: [
+        {
+          name: 'articles',
+          columns: ['title', 'body'],
+        },
+      ],
+    },
+  }
+
+  await orchestrate(config, '0.1.2')
+  await orchestrate({ ...config, retranslate: true }, '0.1.2')
+  await orchestrate({ ...config, retranslate: true }, '0.1.2')
+
+  const readDb = new Database(dbPath, { readonly: true })
+  const rows = readDb
+    .query('SELECT source_id, lang FROM articles_translations ORDER BY source_id, lang')
+    .all() as Array<{ source_id: string; lang: string }>
+  readDb.close()
+
+  expect(rows).toHaveLength(2)
+  expect(rows[0]).toMatchObject({ source_id: '1', lang: 'en' })
+  expect(rows[1]).toMatchObject({ source_id: '1', lang: 'es' })
+})
+
 test('sqlite db - orchestrate respects retranslate=true even when hashes match', async () => {
   const db = new Database(dbPath)
   db.run(`

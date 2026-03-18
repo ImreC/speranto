@@ -388,6 +388,75 @@ const messages = {
   expect(outputContent).toContain('Derechos reservados 2024')
 })
 
+test('translate should skip unchanged markdown and preserve translated content', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  let callCount = 0
+  const originalGenerate = mockProvider.generate.bind(mockProvider)
+  mockProvider.generate = async (...args) => {
+    callCount++
+    return originalGenerate(...args)
+  }
+  mockProvider.setMockResponse(
+    '# Hello World\n\nWelcome to our app.',
+    '# Hola Mundo\n\nBienvenido a nuestra app.',
+  )
+
+  await writeFile(join(sourceDir, 'test.md'), '# Hello World\n\nWelcome to our app.')
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
+  }
+
+  await orchestrate(config, '0.1.2')
+  const firstOutput = await readFile(join(targetDir, 'es', 'test.md'), 'utf-8')
+  expect(firstOutput).toContain('Hola Mundo')
+
+  callCount = 0
+  await orchestrate(config, '0.1.2')
+
+  expect(callCount).toBe(0)
+  const secondOutput = await readFile(join(targetDir, 'es', 'test.md'), 'utf-8')
+  expect(secondOutput).toBe(firstOutput)
+})
+
+test('translate should not create duplicate output files on repeated runs', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  mockProvider.setMockResponse('Hello', 'Hola')
+  mockProvider.setMockResponse('Goodbye', 'Adiós')
+
+  const jsonContent = { greeting: 'Hello', farewell: 'Goodbye' }
+  await writeFile(join(sourceDir, 'test.json'), JSON.stringify(jsonContent, null, 2))
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
+  }
+
+  await orchestrate(config, '0.1.2')
+  await orchestrate(config, '0.1.2')
+  await orchestrate(config, '0.1.2')
+
+  const outputPath = join(targetDir, 'es', 'test.json')
+  const output = JSON.parse(await readFile(outputPath, 'utf-8'))
+  expect(output.greeting).toBe('Hola')
+  expect(output.farewell).toBe('Adiós')
+})
+
 test('translate should respect retranslate=true for unchanged files', async () => {
   const mockProvider = new MockLLMProvider('test-model')
   let callCount = 0

@@ -141,13 +141,22 @@ async function runConcurrent<T>(
   fn: (item: T) => Promise<void>,
 ): Promise<void> {
   let index = 0
+  const errors: Error[] = []
   const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
     while (index < items.length) {
       const current = index++
-      await fn(items[current]!)
+      try {
+        await fn(items[current]!)
+      } catch (err) {
+        errors.push(err instanceof Error ? err : new Error(String(err)))
+      }
     }
   })
   await Promise.all(workers)
+  if (errors.length > 0) {
+    const msg = `${errors.length} item(s) failed: ${errors.map((e) => e.message).join('; ')}`
+    console.warn(msg)
+  }
 }
 
 interface WorkItem {

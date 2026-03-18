@@ -185,10 +185,83 @@ Bun-specific APIs are allowed in:
 - Use `bun:test` for test utilities
 - Create mocks in `tests/mocks/`
 
+### Test Categories
+
+| Command | What it runs | Docker needed? |
+|---|---|---|
+| `bun run test` | All tests **except** PostgreSQL | No |
+| `bun run test:sqlite` | SQLite adapter + orchestration tests | No |
+| `bun run test:postgres` | PostgreSQL adapter tests (auto-starts Docker) | Yes |
+| `bun run test:db` | Both SQLite and PostgreSQL tests | Yes |
+| `bun run test:db:down` | Stops the PostgreSQL Docker container | Yes |
+
+`bun run test` explicitly lists all non-Docker test files, so PostgreSQL tests are **not** included.
+The postgres tests are kept separate because they require a running Docker container. When adding
+new test files, remember to add them to the `test` script in `package.json`.
+
+### PostgreSQL Tests
+
+PostgreSQL tests require Docker. The test runner (`tests/postgres-test-runner.ts`) handles the
+full lifecycle:
+
+```bash
+# Run postgres tests (auto-starts container, runs tests)
+bun run test:postgres
+
+# Stop the postgres container when done
+bun run test:db:down
+```
+
+Under the hood, `test:postgres` does:
+1. Detects `docker compose` or `docker-compose` command
+2. Starts PostgreSQL 16 via `tests/docker-compose.yml` (port 5432, user/pass: test/test, db: speranto_test)
+3. Waits for the health check (`pg_isready`)
+4. Runs `bun test tests/database/postgres.test.ts` with `LLM_API_KEY=test`
+
+The container keeps running after tests finish. Use `bun run test:db:down` to stop it, or
+rerun `bun run test:postgres` to reuse the existing container.
+
+If port 5432 is already in use (e.g., a local PostgreSQL), stop it first or the container
+will fail to bind.
+
+### Test Files Overview
+
+- `tests/translate.test.ts` — End-to-end file translation orchestration (JSON, JS/TS, Markdown).
+  Tests hash-based skip logic, partial retranslation, sidecar state restoration, and `retranslate` flag.
+- `tests/database/orchestrate-sqlite.test.ts` — End-to-end database translation orchestration
+  using SQLite. Tests duplicate row prevention, hash-based skip, partial field retranslation,
+  `langColumn` per-row source language, and `retranslate` flag.
+- `tests/database/sqlite.test.ts` — SQLite adapter unit tests (CRUD, upsert, table creation).
+- `tests/database/postgres.test.ts` — PostgreSQL adapter unit tests (same interface as SQLite).
+- `tests/parsers/*.test.ts` — Parser unit tests for JSON, JS/TS, and Markdown.
+- `tests/translator.test.ts` — Translator class tests (prompt construction, LLM interaction).
+- `tests/providers.test.ts` — LLM provider instantiation tests.
+
 ### Mocking
 
 For LLM providers, use `MockLLMProvider` from `tests/mocks/LLMProvider.ts` to avoid
 real API calls in tests.
+
+### Duplicate Prevention Testing
+
+The codebase uses SHA256 hashes at row and field level to skip unchanged translations.
+Tests verify this at two levels:
+
+**File orchestration** (`translate.test.ts`):
+- Unchanged JSON groups produce 0 LLM calls on second run
+- Adding a key to a group triggers retranslation of only that group
+- Unchanged JS groups are skipped; changed groups are retranslated
+- Unchanged markdown is skipped and translated content is preserved
+- `retranslate: true` forces retranslation regardless of hashes
+
+**Database orchestration** (`orchestrate-sqlite.test.ts`):
+- Unchanged rows produce 0 LLM calls on second run
+- Changed fields trigger retranslation; unchanged fields are reused
+- Multiple runs with `retranslate: true` do not create duplicate rows (upsert on source_id+lang)
+- `retranslate: true` forces retranslation regardless of hashes
+
+**Adapter level** (`sqlite.test.ts`, `postgres.test.ts`):
+- `upsertTranslation` with same source_id+lang updates the existing row (no duplicates)
 
 ## Project Structure
 
@@ -223,7 +296,8 @@ tests/
 │   └── BunFile.ts
 ├── database/
 │   ├── sqlite.test.ts
-│   └── postgres.test.ts
+│   ├── postgres.test.ts
+│   └── orchestrate-sqlite.test.ts
 ├── parsers/
 │   ├── json.test.ts
 │   ├── js.test.ts
