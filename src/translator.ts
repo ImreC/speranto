@@ -195,11 +195,17 @@ export class Translator {
     cleaned = cleaned.trim()
 
     try {
-      const parsed = JSON.parse(cleaned) as Record<string, string>
-      return originalStrings.map(({ key }) => ({
-        key,
-        value: parsed[key] ?? originalStrings.find((s) => s.key === key)?.value ?? '',
-      }))
+      const parsed = JSON.parse(cleaned) as Record<string, unknown>
+      return originalStrings.map(({ key }) => {
+        const raw = parsed[key]
+        const value =
+          typeof raw === 'string'
+            ? raw
+            : raw && typeof raw === 'object' && 'value' in raw && typeof (raw as any).value === 'string'
+              ? (raw as any).value
+              : originalStrings.find((s) => s.key === key)?.value ?? ''
+        return { key, value }
+      })
     } catch {
       throw new Error(`Failed to parse group translation response as JSON: ${cleaned.slice(0, 100)}`)
     }

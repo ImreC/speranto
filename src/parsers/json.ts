@@ -194,6 +194,32 @@ function splitNumerically(
   return chunks
 }
 
+export function mergeExcludedKeys(
+  result: TranslatableJSON,
+  existing: TranslatableJSON,
+  excludeKeys: string[],
+): void {
+  const excludeSet = new Set(excludeKeys)
+  for (const key of Object.keys(result)) {
+    if (excludeSet.has(key)) {
+      if (key in existing) {
+        result[key] = existing[key]!
+      }
+    } else if (
+      typeof result[key] === 'object' &&
+      result[key] !== null &&
+      typeof existing[key] === 'object' &&
+      existing[key] !== null
+    ) {
+      mergeExcludedKeys(
+        result[key] as TranslatableJSON,
+        existing[key] as TranslatableJSON,
+        excludeKeys,
+      )
+    }
+  }
+}
+
 export async function reconstructJSON(
   original: TranslatableJSON,
   translations: Array<{ path: string[]; value: string }>,

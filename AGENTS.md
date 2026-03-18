@@ -9,6 +9,12 @@ Markdown files and database content using LLM providers (OpenAI, Mistral, Ollama
 
 Published to npm as `@speranto/speranto` and to JSR as `@speranto/speranto`.
 
+## CLI Flags
+
+- `--retranslate` / `-r` — Force retranslation of all values, even if already translated
+- `--init` — Build state from existing translations without translating (populates `.speranto/`
+  sidecar from existing source+target file pairs)
+
 ## Build/Lint/Test Commands
 
 Use Bun instead of Node.js for all tooling:
@@ -17,13 +23,13 @@ Use Bun instead of Node.js for all tooling:
 # Install dependencies
 bun install
 
-# Run all tests
+# Run all tests (excludes PostgreSQL — no Docker needed)
 bun run test
 
 # Run SQLite database tests
 bun run test:sqlite
 
-# Run PostgreSQL database tests (starts Docker if needed)
+# Run PostgreSQL database tests (starts Docker automatically)
 bun run test:postgres
 
 # Run all database tests
@@ -44,9 +50,6 @@ tsc --noEmit
 
 Note: Tests require `LLM_API_KEY=test`. The package script sets this automatically for
 `bun run test`; for direct `bun test ...` invocations, set it manually.
-`bun run test:postgres` uses the integrated runner in `tests/postgres-test-runner.ts` to ensure the
-PostgreSQL test container from `tests/docker-compose.yml` is running before executing the Postgres
-test file.
 
 ## Code Style
 
@@ -199,20 +202,22 @@ Bun-specific APIs are allowed in:
 The postgres tests are kept separate because they require a running Docker container. When adding
 new test files, remember to add them to the `test` script in `package.json`.
 
-### PostgreSQL Tests
+### PostgreSQL Tests — READ THIS BEFORE RUNNING
 
-PostgreSQL tests require Docker. The test runner (`tests/postgres-test-runner.ts`) handles the
-full lifecycle:
+PostgreSQL tests ALWAYS fail with `PostgresError: Connection closed` if you run them via
+`bun test` or `bun run test` directly. They require Docker and MUST be run through the
+dedicated test runner:
 
 ```bash
-# Run postgres tests (auto-starts container, runs tests)
+# CORRECT — starts Docker container automatically, then runs tests
 bun run test:postgres
 
-# Stop the postgres container when done
-bun run test:db:down
+# WRONG — will fail with connection errors
+bun test tests/database/postgres.test.ts
+LLM_API_KEY=test bun test tests/database/postgres.test.ts
 ```
 
-Under the hood, `test:postgres` does:
+`bun run test:postgres` uses `tests/postgres-test-runner.ts` which:
 1. Detects `docker compose` or `docker-compose` command
 2. Starts PostgreSQL 16 via `tests/docker-compose.yml` (port 5432, user/pass: test/test, db: speranto_test)
 3. Waits for the health check (`pg_isready`)
@@ -223,6 +228,9 @@ rerun `bun run test:postgres` to reuse the existing container.
 
 If port 5432 is already in use (e.g., a local PostgreSQL), stop it first or the container
 will fail to bind.
+
+`bun run test` deliberately excludes PostgreSQL tests. Postgres connection failures in
+`bun run test` output are expected and should be ignored — they are NOT real test failures.
 
 ### Test Files Overview
 
@@ -320,8 +328,16 @@ tests/
 - Database translations store base-language rows in translation tables, making them the canonical
   read model for all languages
 - Database change detection uses row-level and per-field hashes
-- File translation state is stored in a sidecar `.speranto/` directory and uses hash-based
-  file/group/chunk detection
+- File translation state is stored in a sidecar `.speranto/` directory (relative to `process.cwd()`)
+  and uses hash-based file/group/chunk detection
+- `--init` populates state from existing source+target pairs without calling the LLM
+- `excludeKeys` in file config skips specified leaf keys from translation (e.g., `localizedSlug`).
+  For JSON files, excluded keys are merged back from existing target files via `mergeExcludedKeys`.
+  For JS/TS files, excluded key values are preserved from existing target files via positional
+  matching in `collectJSWorkItems`
+- `parseGroupResponse` in the Translator validates that LLM responses contain string values. If
+  the LLM returns an object with a `value` property instead of a plain string, the string is
+  extracted automatically
 - Set `concurrency: 1` to process translations sequentially on low rate-limit setups
 - Default provider is `mistral` with model `mistral-large-latest`
 - CLI options override config file values; config loaded from `speranto.config.ts` or `.js`

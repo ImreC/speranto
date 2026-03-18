@@ -9,12 +9,15 @@ import {
   stringifyJSON,
   extractTranslatableGroups,
   reconstructJSON,
+  mergeExcludedKeys,
   splitLargeGroups,
   type SplitGroup,
+  type TranslatableJSON,
 } from './parsers/json'
 import {
   parseJS,
   extractTranslatableGroupsJS,
+  extractTranslatableStringsJS,
   reconstructJS,
   splitLargeGroupsJS,
   type SplitJSGroup,
@@ -58,6 +61,11 @@ async function translateFiles(config: FileTranslateConfig) {
 
   if (allFiles.length === 0) return
 
+  if (config.init) {
+    await initFiles(config, allFiles)
+    return
+  }
+
   for (const targetLang of config.targetLangs) {
     const translator = new Translator({
       model: config.model,
@@ -71,7 +79,7 @@ async function translateFiles(config: FileTranslateConfig) {
       instructionsDir: config.instructionsDir,
       retranslate: config.retranslate,
     })
-    const stateStore = new FileStateStore(getFileStateRoot(config), targetLang)
+    const stateStore = new FileStateStore(getFileStateRoot(), targetLang)
     await stateStore.load()
 
     const fileWorkMap = new Map<
@@ -183,8 +191,8 @@ async function collectFileWorkItemsForFile(
   return []
 }
 
-function getFileStateRoot(config: FileTranslateConfig): string {
-  return join(dirname(config.files.sourceDir), '.speranto')
+function getFileStateRoot(): string {
+  return join(process.cwd(), '.speranto')
 }
 
 function getTargetPath(config: FileTranslateConfig, filePath: string, targetLang: string): string {
@@ -360,7 +368,16 @@ async function collectJSONWorkItems(
   }
 
   const jsonData = await parseJSON(content)
-  const groups = await extractTranslatableGroups(jsonData, config.files.excludeKeys)
+  const excludeKeys = config.files.excludeKeys
+
+  let existingTargetJSON: TranslatableJSON | undefined
+  if (excludeKeys?.length && existsSync(targetPath)) {
+    try {
+      existingTargetJSON = await parseJSON(await readFile(targetPath, 'utf-8'))
+    } catch {}
+  }
+
+  const groups = await extractTranslatableGroups(jsonData, excludeKeys)
 
   const splitGroups: SplitGroup[] = config.files.maxStringsPerGroup
     ? splitLargeGroups(groups, config.files.maxStringsPerGroup)
@@ -445,6 +462,9 @@ async function collectJSONWorkItems(
           filePath,
           write: async () => {
             const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
+            if (excludeKeys?.length && existingTargetJSON) {
+              mergeExcludedKeys(translatedJSON, existingTargetJSON, excludeKeys)
+            }
             const translatedContent = await stringifyJSON(translatedJSON)
             await writeOutput(config, filePath, translatedContent, targetLang)
             stateStore.set(relativePath, {
@@ -467,6 +487,9 @@ async function collectJSONWorkItems(
             filePath,
             write: async () => {
               const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
+              if (excludeKeys?.length && existingTargetJSON) {
+                mergeExcludedKeys(translatedJSON, existingTargetJSON, excludeKeys)
+              }
               const translatedContent = await stringifyJSON(translatedJSON)
               await writeOutput(config, filePath, translatedContent, targetLang)
               stateStore.set(relativePath, {
@@ -504,7 +527,8 @@ async function collectJSWorkItems(
   }
 
   const ast = await parseJS(content, isTypeScript)
-  const groups = await extractTranslatableGroupsJS(ast, config.files.excludeKeys)
+  const excludeKeys = config.files.excludeKeys
+  const groups = await extractTranslatableGroupsJS(ast, excludeKeys)
 
   const splitGroups: SplitJSGroup[] = config.files.maxStringsPerGroup
     ? splitLargeGroupsJS(groups, config.files.maxStringsPerGroup)
@@ -515,6 +539,26 @@ async function collectJSWorkItems(
   const workItems: WorkItem[] = []
   const allTranslatedStrings: Array<{ path: string; value: string }> = []
   const nextGroupStates: Record<string, StoredFileGroupState> = {}
+
+  let excludedKeyValues: Map<string, string> | undefined
+  if (excludeKeys?.length && existsSync(targetPath)) {
+    try {
+      const excludeSet = new Set(excludeKeys)
+      const sourceAllStrings = await extractTranslatableStringsJS(await parseJS(content, isTypeScript))
+      const targetContent = await readFile(targetPath, 'utf-8')
+      const targetAST = await parseJS(targetContent, isTypeScript)
+      const targetAllStrings = await extractTranslatableStringsJS(targetAST)
+
+      excludedKeyValues = new Map()
+      for (let i = 0; i < sourceAllStrings.length && i < targetAllStrings.length; i++) {
+        const src = sourceAllStrings[i]!
+        const leafKey = src.objectPath[src.objectPath.length - 1]
+        if (leafKey && excludeSet.has(leafKey)) {
+          excludedKeyValues.set(src.path, targetAllStrings[i]!.value)
+        }
+      }
+    } catch {}
+  }
 
   for (const group of allGroups) {
     const sourceStrings: HashEntry[] = group.strings.map((str) => ({
@@ -588,7 +632,10 @@ async function collectJSWorkItems(
           filePath,
           write: async () => {
             const freshAST = await parseJS(content, isTypeScript)
-            const translatedContent = await reconstructJS(freshAST, allTranslatedStrings)
+            const stringsWithExcluded = excludedKeyValues
+              ? [...allTranslatedStrings, ...Array.from(excludedKeyValues.entries()).map(([path, value]) => ({ path, value }))]
+              : allTranslatedStrings
+            const translatedContent = await reconstructJS(freshAST, stringsWithExcluded)
             await writeOutput(config, filePath, translatedContent, targetLang)
             stateStore.set(relativePath, {
               fileHash: sourceFileHash,
@@ -610,7 +657,10 @@ async function collectJSWorkItems(
             filePath,
             write: async () => {
               const freshAST = await parseJS(content, isTypeScript)
-              const translatedContent = await reconstructJS(freshAST, allTranslatedStrings)
+              const stringsWithExcluded = excludedKeyValues
+                ? [...allTranslatedStrings, ...Array.from(excludedKeyValues.entries()).map(([path, value]) => ({ path, value }))]
+                : allTranslatedStrings
+              const translatedContent = await reconstructJS(freshAST, stringsWithExcluded)
               await writeOutput(config, filePath, translatedContent, targetLang)
               stateStore.set(relativePath, {
                 fileHash: sourceFileHash,
@@ -635,6 +685,195 @@ function getFileGroupStateId(groupKey: string, keys: string[]): string {
 
 function getMarkdownChunkStateId(index: number): string {
   return `chunk_${index}`
+}
+
+async function initFiles(config: FileTranslateConfig, allFiles: string[]) {
+  for (const targetLang of config.targetLangs) {
+    const stateStore = new FileStateStore(getFileStateRoot(), targetLang)
+    await stateStore.load()
+
+    const tasks = []
+
+    for (const filePath of allFiles) {
+      const relativePath = relative(config.files.sourceDir, filePath)
+      const ext = extname(filePath)
+      const targetPath = getTargetPath(config, filePath, targetLang)
+
+      if (!existsSync(targetPath)) continue
+
+      tasks.push({
+        title: relativePath,
+        task: async () => {
+          const content = await readFile(filePath, 'utf-8')
+          const sourceFileHash = createContentHash(content)
+          const targetContent = await readFile(targetPath, 'utf-8')
+
+          if (ext === '.json') {
+            await initJSONFile(relativePath, content, targetContent, sourceFileHash, config, stateStore)
+          } else if (ext === '.js' || ext === '.ts') {
+            await initJSFile(relativePath, content, targetContent, sourceFileHash, ext === '.ts', config, stateStore)
+          } else if (ext === '.md') {
+            await initMarkdownFile(relativePath, content, targetContent, sourceFileHash, config, stateStore)
+          }
+        },
+      })
+    }
+
+    if (tasks.length === 0) continue
+
+    const listr = new Listr(tasks, {
+      concurrent: false,
+      exitOnError: false,
+      rendererOptions: { collapseSubtasks: true },
+    } as any)
+
+    console.log(`\nInit → ${targetLang}`)
+    await listr.run()
+    await stateStore.save()
+  }
+}
+
+async function initJSONFile(
+  relativePath: string,
+  sourceContent: string,
+  targetContent: string,
+  sourceFileHash: string,
+  config: FileTranslateConfig,
+  stateStore: FileStateStore,
+) {
+  const jsonData = await parseJSON(sourceContent)
+  const targetJSON = await parseJSON(targetContent)
+  const groups = await extractTranslatableGroups(jsonData, config.files.excludeKeys)
+
+  const splitGroups: SplitGroup[] = config.files.maxStringsPerGroup
+    ? splitLargeGroups(groups, config.files.maxStringsPerGroup)
+    : groups.map((group) => ({ group }))
+
+  const allGroups = splitGroups.flatMap((sg) => sg.subgroups || [sg.group])
+  const nextGroupStates: Record<string, StoredFileGroupState> = {}
+
+  for (const group of allGroups) {
+    const sourceStrings: HashEntry[] = group.strings.map((str) => ({
+      key: str.path.join('.'),
+      value: str.value,
+    }))
+    const groupId = getFileGroupStateId(group.groupKey, sourceStrings.map((str) => str.key))
+    const hashMetadata = createHashMetadata(sourceStrings, config.sourceLang)
+
+    const translations: Record<string, string> = {}
+    for (const str of group.strings) {
+      const key = str.path.join('.')
+      let targetValue = getNestedValue(targetJSON, str.path)
+      translations[key] = targetValue ?? str.value
+    }
+
+    nextGroupStates[groupId] = {
+      rowHash: hashMetadata.rowHash,
+      fieldHashes: hashMetadata.fieldHashes,
+      translations,
+    }
+  }
+
+  stateStore.set(relativePath, {
+    fileHash: sourceFileHash,
+    format: 'json',
+    groups: nextGroupStates,
+  })
+}
+
+function getNestedValue(obj: TranslatableJSON, path: string[]): string | undefined {
+  let current: TranslatableJSON | string = obj
+  for (const key of path) {
+    if (typeof current !== 'object' || current === null) return undefined
+    current = (current as TranslatableJSON)[key]!
+    if (current === undefined) return undefined
+  }
+  return typeof current === 'string' ? current : undefined
+}
+
+async function initJSFile(
+  relativePath: string,
+  sourceContent: string,
+  targetContent: string,
+  sourceFileHash: string,
+  isTypeScript: boolean,
+  config: FileTranslateConfig,
+  stateStore: FileStateStore,
+) {
+  const sourceAST = await parseJS(sourceContent, isTypeScript)
+  const targetAST = await parseJS(targetContent, isTypeScript)
+  const groups = await extractTranslatableGroupsJS(sourceAST, config.files.excludeKeys)
+  const targetStrings = await extractTranslatableStringsJS(targetAST)
+  const targetMap = new Map(targetStrings.map((s) => [s.path, s.value]))
+
+  const splitGroups: SplitJSGroup[] = config.files.maxStringsPerGroup
+    ? splitLargeGroupsJS(groups, config.files.maxStringsPerGroup)
+    : groups.map((group) => ({ group }))
+
+  const allGroups = splitGroups.flatMap((sg) => sg.subgroups || [sg.group])
+  const nextGroupStates: Record<string, StoredFileGroupState> = {}
+
+  for (const group of allGroups) {
+    const sourceStrings: HashEntry[] = group.strings.map((str) => ({
+      key: str.objectPath.join('.') || str.path,
+      value: str.value,
+    }))
+    const groupId = getFileGroupStateId(group.groupKey, sourceStrings.map((str) => str.key))
+    const hashMetadata = createHashMetadata(sourceStrings, config.sourceLang)
+
+    const translations: Record<string, string> = {}
+    for (const str of group.strings) {
+      const key = str.objectPath.join('.') || str.path
+      translations[key] = targetMap.get(str.path) ?? str.value
+    }
+
+    nextGroupStates[groupId] = {
+      rowHash: hashMetadata.rowHash,
+      fieldHashes: hashMetadata.fieldHashes,
+      translations,
+    }
+  }
+
+  stateStore.set(relativePath, {
+    fileHash: sourceFileHash,
+    format: 'js',
+    groups: nextGroupStates,
+  })
+}
+
+async function initMarkdownFile(
+  relativePath: string,
+  sourceContent: string,
+  targetContent: string,
+  sourceFileHash: string,
+  config: FileTranslateConfig,
+  stateStore: FileStateStore,
+) {
+  const tree = await parseMarkdown(sourceContent)
+  const chunks = await getTranslatableChunks(tree)
+  if (chunks.length === 0) return
+
+  const targetTree = await parseMarkdown(targetContent)
+  const targetChunks = await getTranslatableChunks(targetTree)
+
+  const nextChunkStates: Record<string, StoredMarkdownChunkState> = {}
+
+  for (const [index, chunk] of chunks.entries()) {
+    const chunkId = getMarkdownChunkStateId(index)
+    const hashMetadata = createHashMetadata([{ key: 'text', value: chunk.text }], config.sourceLang)
+    const targetText = targetChunks[index]?.text ?? chunk.text
+
+    nextChunkStates[chunkId] = {
+      rowHash: hashMetadata.rowHash,
+      translatedText: targetText,
+    }
+  }
+
+  stateStore.set(relativePath, {
+    fileHash: sourceFileHash,
+    format: 'md',
+    chunks: nextChunkStates,
+  })
 }
 
 function prepareGroupedTranslations(

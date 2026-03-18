@@ -29,6 +29,7 @@ program
   .option('-n, --concurrency <number>', 'Max concurrent LLM calls (default 5)', parseInt)
   .option('-v, --verbose', 'Enable verbose output for debugging')
   .option('-r, --retranslate', 'Force retranslation of all values, even if already translated')
+  .option('--init', 'Build state from existing translations without translating')
   .action(async (options) => {
     const passedConfig = await loadConfig(options.config)
 
@@ -46,6 +47,7 @@ program
       files: passedConfig.files,
       database: passedConfig.database,
       retranslate: options.retranslate || passedConfig.retranslate || false,
+      init: options.init || false,
     }
 
     if (!config.files && !config.database) {

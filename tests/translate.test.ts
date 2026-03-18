@@ -21,6 +21,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(testDir, { recursive: true, force: true })
+  await rm(join(process.cwd(), '.speranto'), { recursive: true, force: true })
 })
 
 test('translate should handle JSON files with single target language', async () => {
@@ -487,4 +488,245 @@ test('translate should respect retranslate=true for unchanged files', async () =
   await orchestrate({ ...baseConfig, retranslate: true }, '0.1.2')
 
   expect(callCount).toBe(1)
+})
+
+test('excluded keys should use existing target values instead of source values', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  mockProvider.setMockResponse('Hello', 'Hola')
+  mockProvider.setMockResponse('Welcome', 'Bienvenido')
+
+  const jsonContent = {
+    page: {
+      title: 'Hello',
+      description: 'Welcome',
+      localizedSlug: 'hello-page',
+    },
+  }
+  await writeFile(join(sourceDir, 'test.json'), JSON.stringify(jsonContent, null, 2))
+
+  const esTargetDir = join(targetDir, 'es')
+  await mkdir(esTargetDir, { recursive: true })
+  const existingTarget = {
+    page: {
+      title: 'Hola',
+      description: 'Bienvenido',
+      localizedSlug: 'pagina-hola',
+    },
+  }
+  await writeFile(join(esTargetDir, 'test.json'), JSON.stringify(existingTarget, null, 2))
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    retranslate: true,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+      excludeKeys: ['localizedSlug'],
+    },
+  }
+
+  await orchestrate(config, '0.1.2')
+
+  const output = JSON.parse(await readFile(join(esTargetDir, 'test.json'), 'utf-8'))
+  expect(output.page.localizedSlug).toBe('pagina-hola')
+  expect(output.page.title).toBe('Hola')
+})
+
+test('excluded keys should fall back to source value when no target file exists', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  mockProvider.setMockResponse('Hello', 'Hola')
+
+  const jsonContent = {
+    page: {
+      title: 'Hello',
+      localizedSlug: 'hello-page',
+    },
+  }
+  await writeFile(join(sourceDir, 'test.json'), JSON.stringify(jsonContent, null, 2))
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+      excludeKeys: ['localizedSlug'],
+    },
+  }
+
+  await orchestrate(config, '0.1.2')
+
+  const output = JSON.parse(await readFile(join(targetDir, 'es', 'test.json'), 'utf-8'))
+  expect(output.page.localizedSlug).toBe('hello-page')
+  expect(output.page.title).toBe('Hola')
+})
+
+test('init mode should produce 0 LLM calls and build state', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  let callCount = 0
+  const originalGenerate = mockProvider.generate.bind(mockProvider)
+  mockProvider.generate = async (...args) => {
+    callCount++
+    return originalGenerate(...args)
+  }
+
+  const jsonContent = {
+    nav: {
+      home: 'Home',
+      about: 'About',
+    },
+  }
+  await writeFile(join(sourceDir, 'test.json'), JSON.stringify(jsonContent, null, 2))
+
+  const esTargetDir = join(targetDir, 'es')
+  await mkdir(esTargetDir, { recursive: true })
+  const existingTarget = {
+    nav: {
+      home: 'Inicio',
+      about: 'Acerca de',
+    },
+  }
+  await writeFile(join(esTargetDir, 'test.json'), JSON.stringify(existingTarget, null, 2))
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    init: true,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
+  }
+
+  await orchestrate(config, '0.1.2')
+
+  expect(callCount).toBe(0)
+})
+
+test('after init, normal run should skip unchanged files', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  let callCount = 0
+  const originalGenerate = mockProvider.generate.bind(mockProvider)
+  mockProvider.generate = async (...args) => {
+    callCount++
+    return originalGenerate(...args)
+  }
+
+  const jsonContent = {
+    nav: {
+      home: 'Home',
+      about: 'About',
+    },
+  }
+  await writeFile(join(sourceDir, 'test.json'), JSON.stringify(jsonContent, null, 2))
+
+  const esTargetDir = join(targetDir, 'es')
+  await mkdir(esTargetDir, { recursive: true })
+  const existingTarget = {
+    nav: {
+      home: 'Inicio',
+      about: 'Acerca de',
+    },
+  }
+  await writeFile(join(esTargetDir, 'test.json'), JSON.stringify(existingTarget, null, 2))
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
+  }
+
+  await orchestrate({ ...config, init: true }, '0.1.2')
+
+  callCount = 0
+  await orchestrate(config, '0.1.2')
+
+  expect(callCount).toBe(0)
+})
+
+test('after init, changing source should trigger retranslation of changed groups', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  let callCount = 0
+  const originalGenerate = mockProvider.generate.bind(mockProvider)
+  mockProvider.generate = async (...args) => {
+    callCount++
+    return originalGenerate(...args)
+  }
+  mockProvider.setMockResponse('Home', 'Inicio')
+  mockProvider.setMockResponse('About', 'Acerca de')
+  mockProvider.setMockResponse('Welcome', 'Bienvenido')
+
+  const jsonContent = {
+    nav: {
+      home: 'Home',
+      about: 'About',
+    },
+    footer: {
+      copyright: 'Copyright 2024',
+    },
+  }
+  await writeFile(join(sourceDir, 'test.json'), JSON.stringify(jsonContent, null, 2))
+
+  const esTargetDir = join(targetDir, 'es')
+  await mkdir(esTargetDir, { recursive: true })
+  const existingTarget = {
+    nav: {
+      home: 'Inicio',
+      about: 'Acerca de',
+    },
+    footer: {
+      copyright: 'Derechos reservados 2024',
+    },
+  }
+  await writeFile(join(esTargetDir, 'test.json'), JSON.stringify(existingTarget, null, 2))
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
+  }
+
+  await orchestrate({ ...config, init: true }, '0.1.2')
+
+  const updatedJsonContent = {
+    nav: {
+      home: 'Home',
+      about: 'About',
+      welcome: 'Welcome',
+    },
+    footer: {
+      copyright: 'Copyright 2024',
+    },
+  }
+  await writeFile(join(sourceDir, 'test.json'), JSON.stringify(updatedJsonContent, null, 2))
+
+  callCount = 0
+  await orchestrate(config, '0.1.2')
+
+  expect(callCount).toBe(1)
+  const output = JSON.parse(await readFile(join(esTargetDir, 'test.json'), 'utf-8'))
+  expect(output.nav.welcome).toBe('Bienvenido')
+  expect(output.footer.copyright).toBe('Derechos reservados 2024')
 })

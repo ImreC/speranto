@@ -99,4 +99,6 @@ export interface Config {
   database?: DatabaseConfig
   /** Force retranslation of all values, even if already translated */
   retranslate?: boolean
+  /** Build state from existing translations without translating */
+  init?: boolean
 }
