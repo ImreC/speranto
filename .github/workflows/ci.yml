@@ -1,15 +1,14 @@
-name: Publish
+name: CI
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
-  publish:
+  test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     services:
       postgres:
         image: postgres:16-alpine
@@ -37,16 +36,8 @@ jobs:
       - name: Run tests
         run: bun run test
 
+      - name: Type check
+        run: bunx tsc --noEmit
+
       - name: Build
         run: bun run build
-
-      - name: Publish to JSR
-        run: bunx jsr publish
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-
-      - name: Publish to npm
-        run: npm publish --provenance --access public

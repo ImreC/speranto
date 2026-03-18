@@ -39,10 +39,9 @@
     "bump:major": "bun run scripts/version.ts major",
     "example:seed": "bun run scripts/seed-example-db.ts",
     "example": "bun run example:seed && cd example_content && bun ../index.ts",
-    "test": "LLM_API_KEY=test bun test tests/parsers tests/translator.test.ts tests/providers.test.ts tests/translate.test.ts tests/database/sqlite.test.ts tests/database/orchestrate-sqlite.test.ts",
-    "test:sqlite": "LLM_API_KEY=test bun test tests/database/sqlite.test.ts",
+    "test": "bun run test:no-docker && bun run test:postgres",
+    "test:no-docker": "LLM_API_KEY=test bun test tests/parsers tests/*.test.ts tests/database/sqlite.test.ts tests/database/orchestrate-sqlite.test.ts",
     "test:postgres": "bun run tests/postgres-test-runner.ts",
-    "test:db": "bun run test:sqlite && bun run test:postgres",
     "test:db:down": "bun run tests/postgres-test-runner.ts down"
   },
   "devDependencies": {

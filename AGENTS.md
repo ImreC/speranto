@@ -23,17 +23,20 @@ Use Bun instead of Node.js for all tooling:
 # Install dependencies
 bun install
 
-# Run all tests (excludes PostgreSQL — no Docker needed)
+# Run ALL tests including PostgreSQL (requires Docker)
 bun run test
 
-# Run SQLite database tests
-bun run test:sqlite
+# Run all tests except PostgreSQL (no Docker needed)
+bun run test:no-docker
 
-# Run PostgreSQL database tests (starts Docker automatically)
+# Run only PostgreSQL tests (starts Docker automatically)
 bun run test:postgres
 
-# Run all database tests
-bun run test:db
+# Run only SQLite tests
+bun run test:sqlite
+
+# Stop the PostgreSQL Docker container
+bun run test:db:down
 
 # Run a single test file
 LLM_API_KEY=test bun test tests/translator.test.ts
@@ -192,32 +195,33 @@ Bun-specific APIs are allowed in:
 
 | Command | What it runs | Docker needed? |
 |---|---|---|
-| `bun run test` | All tests **except** PostgreSQL | No |
+| `bun run test` | **All tests** including PostgreSQL | Yes |
+| `bun run test:no-docker` | All tests **except** PostgreSQL | No |
 | `bun run test:sqlite` | SQLite adapter + orchestration tests | No |
 | `bun run test:postgres` | PostgreSQL adapter tests (auto-starts Docker) | Yes |
-| `bun run test:db` | Both SQLite and PostgreSQL tests | Yes |
-| `bun run test:db:down` | Stops the PostgreSQL Docker container | Yes |
+| `bun run test:db:down` | Stops the PostgreSQL Docker container | — |
 
-`bun run test` explicitly lists all non-Docker test files, so PostgreSQL tests are **not** included.
-The postgres tests are kept separate because they require a running Docker container. When adding
-new test files, remember to add them to the `test` script in `package.json`.
+`bun run test` runs the non-Docker tests first, then automatically starts the PostgreSQL Docker
+container and runs postgres tests via the test runner. New test files in `tests/*.test.ts` and
+`tests/parsers/` are picked up automatically. Database test files in `tests/database/` must be
+added to the `test:no-docker` script explicitly (to keep postgres excluded).
 
 ### PostgreSQL Tests — READ THIS BEFORE RUNNING
 
 PostgreSQL tests ALWAYS fail with `PostgresError: Connection closed` if you run them via
-`bun test` or `bun run test` directly. They require Docker and MUST be run through the
-dedicated test runner:
+`bun test` directly. They require Docker and MUST be run through the dedicated test runner:
 
 ```bash
-# CORRECT — starts Docker container automatically, then runs tests
-bun run test:postgres
+# CORRECT — these both work
+bun run test              # runs everything including postgres
+bun run test:postgres     # runs only postgres tests
 
 # WRONG — will fail with connection errors
 bun test tests/database/postgres.test.ts
 LLM_API_KEY=test bun test tests/database/postgres.test.ts
 ```
 
-`bun run test:postgres` uses `tests/postgres-test-runner.ts` which:
+The test runner (`tests/postgres-test-runner.ts`):
 1. Detects `docker compose` or `docker-compose` command
 2. Starts PostgreSQL 16 via `tests/docker-compose.yml` (port 5432, user/pass: test/test, db: speranto_test)
 3. Waits for the health check (`pg_isready`)
@@ -228,9 +232,6 @@ rerun `bun run test:postgres` to reuse the existing container.
 
 If port 5432 is already in use (e.g., a local PostgreSQL), stop it first or the container
 will fail to bind.
-
-`bun run test` deliberately excludes PostgreSQL tests. Postgres connection failures in
-`bun run test` output are expected and should be ignored — they are NOT real test failures.
 
 ### Test Files Overview
 
