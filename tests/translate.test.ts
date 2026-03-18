@@ -36,7 +36,6 @@ test('translate should handle JSON files with single target language', async () 
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['es'],
     provider: 'mistral',
@@ -64,7 +63,6 @@ test('translate should handle multiple target languages', async () => {
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.5,
     sourceLang: 'en',
     targetLangs: ['es', 'fr', 'de'],
     provider: 'mistral',
@@ -87,7 +85,6 @@ test('translate should use language code as filename when configured', async () 
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['es'],
     provider: 'mistral',
@@ -117,7 +114,6 @@ const config = {
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['fr'],
     provider: 'mistral',
@@ -151,7 +147,6 @@ const config: Config = {
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['de'],
     provider: 'mistral',
@@ -178,7 +173,6 @@ test('translate should find files in nested directories', async () => {
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['es'],
     provider: 'mistral',
@@ -225,7 +219,6 @@ test('translate should skip unchanged JSON groups and reuse existing translation
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['es'],
     provider: 'mistral',
@@ -268,7 +261,6 @@ test('translate should retranslate groups with new keys', async () => {
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['es'],
     provider: 'mistral',
@@ -313,7 +305,6 @@ test('translate should restore markdown output from sidecar state without retran
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.5,
     sourceLang: 'en',
     targetLangs: ['es'],
     provider: 'mistral',
@@ -363,7 +354,6 @@ const messages = {
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['es'],
     provider: 'mistral',
@@ -412,7 +402,6 @@ test('translate should respect retranslate=true for unchanged files', async () =
 
   const baseConfig: Config = {
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLangs: ['es'],
     provider: 'mistral',

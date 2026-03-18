@@ -47,6 +47,8 @@ export interface FileConfig {
   useLangCodeAsFilename?: boolean
   /** Maximum strings per translation batch */
   maxStringsPerGroup?: number
+  /** Field names to exclude from translation (matched against the leaf key) */
+  excludeKeys?: string[]
 }
 
 /**
@@ -58,7 +60,6 @@ export interface FileConfig {
  *
  * const config: Config = {
  *   model: 'gpt-4o-mini',
- *   temperature: 0.0,
  *   sourceLang: 'en',
  *   targetLangs: ['es', 'fr', 'de'],
  *   provider: 'openai',
@@ -74,8 +75,6 @@ export interface FileConfig {
 export interface Config {
   /** AI model to use for translation */
   model: string
-  /** Temperature setting (0.0 - 1.0) */
-  temperature: number
   /** Source language code (e.g., 'en') */
   sourceLang: string
   /** Target language codes */
@@ -88,6 +87,8 @@ export interface Config {
   baseUrl?: string
   /** Maximum concurrent LLM calls (default 5, use 1 for sequential) */
   concurrency?: number
+  /** Request timeout in milliseconds (default: 600000 / 10 minutes) */
+  timeout?: number
   /** Enable verbose output */
   verbose?: boolean
   /** Directory containing language-specific instruction files */

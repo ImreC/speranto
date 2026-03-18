@@ -27,7 +27,6 @@ test('Translator should work with mocked LLM provider', async () => {
 
   const translator = new Translator({
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLang: 'es',
     llm: mockProvider,
@@ -42,7 +41,6 @@ test('Translator should handle empty text', async () => {
 
   const translator = new Translator({
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLang: 'fr',
     llm: mockProvider,
@@ -57,7 +55,6 @@ test('Translator should handle LLM errors gracefully', async () => {
 
   const translator = new Translator({
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLang: 'de',
     llm: mockProvider,
@@ -73,7 +70,6 @@ test('Translator should wait for model to be loaded', async () => {
 
   const translator = new Translator({
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLang: 'it',
     llm: mockProvider,
@@ -100,7 +96,6 @@ test('Translator should include language instructions in prompt', async () => {
 
   const translator = new Translator({
     model: 'test-model',
-    temperature: 0.5,
     sourceLang: 'en',
     targetLang: 'es',
     llm: mockProvider,
@@ -119,7 +114,6 @@ test('Translator should handle chunk translation with context', async () => {
 
   const translator = new Translator({
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLang: 'es',
     llm: mockProvider,

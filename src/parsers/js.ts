@@ -59,9 +59,11 @@ function getObjectPath(path: any): string[] {
 
 export async function extractTranslatableStringsJS(
   ast: t.File,
+  excludeKeys?: string[],
 ): Promise<TranslatableJSString[]> {
   const results: TranslatableJSString[] = []
   let nodeCounter = 0
+  const excluded = excludeKeys ? new Set(excludeKeys) : undefined
 
   traverse(ast, {
     StringLiteral(path: any) {
@@ -71,6 +73,8 @@ export async function extractTranslatableStringsJS(
         !isVariableReference(path)
       ) {
         const objectPath = getObjectPath(path)
+        const leafKey = objectPath[objectPath.length - 1]
+        if (excluded && leafKey && excluded.has(leafKey)) return
         results.push({
           path: `string_${nodeCounter++}`,
           objectPath,
@@ -87,6 +91,8 @@ export async function extractTranslatableStringsJS(
       if (path.parent.type === 'ObjectProperty' && path.parent.value === path.node) {
         const value = path.node.quasis[0].value.raw
         const objectPath = getObjectPath(path)
+        const leafKey = objectPath[objectPath.length - 1]
+        if (excluded && leafKey && excluded.has(leafKey)) return
         results.push({
           path: `template_${nodeCounter++}`,
           objectPath,
@@ -102,8 +108,9 @@ export async function extractTranslatableStringsJS(
 
 export async function extractTranslatableGroupsJS(
   ast: t.File,
+  excludeKeys?: string[],
 ): Promise<TranslatableJSGroup[]> {
-  const strings = await extractTranslatableStringsJS(ast)
+  const strings = await extractTranslatableStringsJS(ast, excludeKeys)
   const groups = new Map<string, TranslatableJSString[]>()
 
   for (const item of strings) {

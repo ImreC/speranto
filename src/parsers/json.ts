@@ -18,16 +18,18 @@ export async function stringifyJSON(data: TranslatableJSON): Promise<string> {
 export async function extractTranslatableStrings(
   obj: TranslatableJSON,
   path: string[] = [],
+  excludeKeys?: string[],
 ): Promise<Array<{ path: string[]; value: string }>> {
   const results: Array<{ path: string[]; value: string }> = []
 
   for (const [key, value] of Object.entries(obj)) {
+    if (excludeKeys?.includes(key)) continue
     const currentPath = [...path, key]
 
     if (typeof value === 'string') {
       results.push({ path: currentPath, value })
     } else if (typeof value === 'object' && value !== null) {
-      const nested = await extractTranslatableStrings(value as TranslatableJSON, currentPath)
+      const nested = await extractTranslatableStrings(value as TranslatableJSON, currentPath, excludeKeys)
       results.push(...nested)
     }
   }
@@ -37,10 +39,12 @@ export async function extractTranslatableStrings(
 
 export async function extractTranslatableGroups(
   obj: TranslatableJSON,
+  excludeKeys?: string[],
 ): Promise<TranslatableGroup[]> {
   const groups: TranslatableGroup[] = []
 
   for (const [key, value] of Object.entries(obj)) {
+    if (excludeKeys?.includes(key)) continue
     if (typeof value === 'string') {
       // Top-level strings without nesting - check for dot notation grouping
       // These will be handled separately or put in a 'root' group
@@ -55,7 +59,7 @@ export async function extractTranslatableGroups(
       }
     } else if (typeof value === 'object' && value !== null) {
       // Nested object - this is a "page" or logical group
-      const strings = await extractTranslatableStrings(value as TranslatableJSON, [key])
+      const strings = await extractTranslatableStrings(value as TranslatableJSON, [key], excludeKeys)
       if (strings.length > 0) {
         groups.push({
           groupKey: key,
@@ -68,7 +72,7 @@ export async function extractTranslatableGroups(
   // Now check for dot notation grouping in root strings
   const rootGroup = groups.find((g) => g.groupKey === '_root')
   if (rootGroup && rootGroup.strings.length > 0) {
-    const dotGroups = groupByDotNotation(rootGroup.strings)
+    const dotGroups = groupByDotNotation(rootGroup.strings, excludeKeys)
     // Remove the _root group
     const rootIndex = groups.indexOf(rootGroup)
     groups.splice(rootIndex, 1)
@@ -81,13 +85,17 @@ export async function extractTranslatableGroups(
 
 function groupByDotNotation(
   strings: Array<{ path: string[]; value: string }>,
+  excludeKeys?: string[],
 ): TranslatableGroup[] {
   const groups = new Map<string, Array<{ path: string[]; value: string }>>()
 
   for (const item of strings) {
     const key = item.path[0] || ''
-    // Check if key uses dot notation (e.g., "pricing.description")
     const dotIndex = key.indexOf('.')
+    if (excludeKeys && dotIndex > 0) {
+      const leafKey = key.substring(dotIndex + 1)
+      if (excludeKeys.includes(leafKey)) continue
+    }
     const groupKey = dotIndex > 0 ? key.substring(0, dotIndex) : '_ungrouped'
 
     if (!groups.has(groupKey)) {

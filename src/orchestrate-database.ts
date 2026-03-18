@@ -12,10 +12,8 @@ interface DatabaseTranslateConfig extends Config {
   database: NonNullable<Config['database']>
 }
 
-export function orchestrateDatabase(config: Config): Listr {
-  if (!config.database) {
-    return new Listr([{ title: 'No database configured', task: () => {} }])
-  }
+export async function orchestrateDatabase(config: Config): Promise<void> {
+  if (!config.database) return
 
   const dbConfig = config as DatabaseTranslateConfig
   const suffix = dbConfig.database.translationTableSuffix || '_translations'
@@ -23,123 +21,101 @@ export function orchestrateDatabase(config: Config): Listr {
   const adapter = createDatabaseAdapter(dbConfig.database)
   const translators = new Map<string, Translator>()
 
-  return new Listr(
-    [
-      {
-        title: 'Connect to database',
-        task: async () => {
-          await adapter.connect()
-        },
-      },
-      {
-        title: 'Ensure translation tables',
-        task: () =>
-          new Listr(
-            dbConfig.database.tables.map((table) => ({
-              title: table.schema ? `${table.schema}.${table.name}` : table.name,
-              task: async () => {
-                await adapter.ensureTranslationTable(table, suffix)
-              },
-            })),
-            { concurrent: true },
-          ),
-      },
-      {
-        title: 'Sync translation tables',
-        task: (_ctx: unknown, task: any) =>
-          task.newListr(
-            dbConfig.database.tables.map((table) => ({
-              title: table.schema ? `${table.schema}.${table.name}` : table.name,
-              task: (_ctx: unknown, tableTask: any) =>
-                syncTableTranslations(
-                  adapter,
-                  table,
-                  dbConfig,
-                  suffix,
-                  concurrency,
-                  translators,
-                  tableTask,
-                ),
-            })),
-            { concurrent: false },
-          ),
-      },
-      {
-        title: 'Close connection',
-        task: async () => {
-          await adapter.close()
-        },
-      },
-    ],
-    { concurrent: false },
-  )
-}
+  await adapter.connect()
 
-async function syncTableTranslations(
-  adapter: ReturnType<typeof createDatabaseAdapter>,
-  table: TableConfig,
-  config: DatabaseTranslateConfig,
-  suffix: string,
-  concurrency: number,
-  translators: Map<string, Translator>,
-  task: any,
-) {
-  const sourceRows = await adapter.getSourceRows(table)
-  const existingTranslations = await adapter.getTranslations(table, suffix)
-
-  if (sourceRows.length === 0) {
-    task.skip('no source rows')
-    return
+  for (const table of dbConfig.database.tables) {
+    await adapter.ensureTranslationTable(table, suffix)
   }
 
-  const translationsBySourceId = buildTranslationIndex(existingTranslations)
-  task.title = `${table.schema ? `${table.schema}.` : ''}${table.name} (${sourceRows.length} rows)`
+  for (const targetLang of dbConfig.targetLangs) {
+    const tableTasks = dbConfig.database.tables.map((table) => {
+      const tableName = table.schema ? `${table.schema}.${table.name}` : table.name
+      return {
+        title: tableName,
+        task: async (_ctx: unknown, task: any) => {
+          const sourceRows = await adapter.getSourceRows(table)
+          const existingTranslations = await adapter.getTranslations(table, suffix)
 
-  return task.newListr(
-    sourceRows.map((row) => ({
-      title: `row ${row.id}`,
-      task: async (_ctx: unknown, rowTask: any) => {
-        const rowTranslations = translationsBySourceId.get(String(row.id)) ?? new Map()
-        const sourceLang = row.sourceLang || config.sourceLang
-        const sourceEntries = Object.entries(row.columns).map(([key, value]) => ({
-          key,
-          value,
-        }))
-        const hashMetadata = createHashMetadata(sourceEntries, sourceLang)
+          if (sourceRows.length === 0) {
+            task.skip('no source rows')
+            return
+          }
 
-        await syncBaseLanguageRow(
-          adapter,
-          table,
-          row,
-          sourceLang,
-          hashMetadata,
-          rowTranslations.get(sourceLang),
-          suffix,
-          config.retranslate ?? false,
-        )
+          const translationsBySourceId = buildTranslationIndex(existingTranslations)
+          let done = 0
 
-        const targetLangs = config.targetLangs.filter((targetLang) => targetLang !== sourceLang)
+          await runConcurrent(sourceRows, concurrency, async (row) => {
+            const rowTranslations = translationsBySourceId.get(String(row.id)) ?? new Map()
+            const sourceLang = row.sourceLang || config.sourceLang
+            const sourceEntries = Object.entries(row.columns).map(([key, value]) => ({
+              key,
+              value,
+            }))
+            const hashMetadata = createHashMetadata(sourceEntries, sourceLang)
 
-        for (const targetLang of targetLangs) {
-          await syncTranslatedRow(
-            adapter,
-            table,
-            row,
-            sourceLang,
-            targetLang,
-            hashMetadata,
-            rowTranslations.get(targetLang),
-            config,
-            translators,
-            suffix,
-          )
-        }
+            await syncBaseLanguageRow(
+              adapter,
+              table,
+              row,
+              sourceLang,
+              hashMetadata,
+              rowTranslations.get(sourceLang),
+              suffix,
+              config.retranslate ?? false,
+            )
 
-        rowTask.title = `row ${row.id} synced`
-      },
-    })),
-    { concurrent: concurrency, exitOnError: false },
-  )
+            const langs = [targetLang].filter((lang) => lang !== sourceLang)
+
+            for (const lang of langs) {
+              await syncTranslatedRow(
+                adapter,
+                table,
+                row,
+                sourceLang,
+                lang,
+                hashMetadata,
+                rowTranslations.get(lang),
+                dbConfig,
+                translators,
+                suffix,
+              )
+            }
+
+            done++
+            task.title = `${tableName} — ${done}/${sourceRows.length} rows`
+          })
+
+          task.title = `${tableName} — ${sourceRows.length} rows`
+        },
+      }
+    })
+
+    const listr = new Listr(tableTasks, {
+      concurrent: false,
+      exitOnError: false,
+      rendererOptions: { collapseSubtasks: true },
+    } as any)
+
+    console.log(`\nDatabase → ${targetLang}`)
+    await listr.run()
+  }
+
+  await adapter.close()
+}
+
+async function runConcurrent<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let index = 0
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (index < items.length) {
+      const current = index++
+      await fn(items[current]!)
+    }
+  })
+  await Promise.all(workers)
 }
 
 function buildTranslationIndex(
@@ -293,12 +269,12 @@ function getTranslator(
 
   const translator = new Translator({
     model: config.model,
-    temperature: config.temperature,
     sourceLang,
     targetLang,
     provider: config.provider,
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
+    timeout: config.timeout,
     llm: config.llm,
     instructionsDir: config.instructionsDir,
     retranslate: config.retranslate,

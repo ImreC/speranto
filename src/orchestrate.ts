@@ -35,147 +35,119 @@ interface FileTranslateConfig extends Config {
 }
 
 export async function orchestrate(config: Config, version: string) {
-  const tasks: Array<{ title: string; task: () => Promise<void> | Listr }> = []
-
   if (config.files) {
-    tasks.push({
-      title: 'Files',
-      task: () => translateFiles(config as FileTranslateConfig),
-    })
+    await translateFiles(config as FileTranslateConfig)
   }
 
   if (config.database) {
-    tasks.push({
-      title: 'Database',
-      task: () => orchestrateDatabase(config),
-    })
+    await orchestrateDatabase(config)
   }
-
-  if (tasks.length === 0) {
-    process.stderr.write('No translation sources configured.\n')
-    return
-  }
-
-  const listr = new Listr(tasks, {
-    concurrent: false,
-    renderer: 'default',
-    rendererOptions: {
-      collapseSubtasks: false,
-      collapseSkips: true,
-      suffixSkips: true,
-    },
-  } as any)
-
-  await listr.run()
 }
 
-function translateFiles(config: FileTranslateConfig): Listr {
+async function translateFiles(config: FileTranslateConfig) {
   const { files } = config
   const extensions = ['md', 'json', 'js', 'ts']
   const concurrency = config.concurrency ?? 5
 
-  return new Listr([
-    {
-      title: 'Scanning files',
-      task: async (ctx) => {
-        const patterns = extensions.map((ext) =>
-          files.useLangCodeAsFilename
-            ? join(files.sourceDir, `**/${config.sourceLang}.${ext}`)
-            : join(files.sourceDir, `**/*.${ext}`),
-        )
-        const allFiles = await Promise.all(patterns.map((pattern) => glob(pattern)))
-        ctx.fileList = allFiles.flat()
+  const patterns = extensions.map((ext) =>
+    files.useLangCodeAsFilename
+      ? join(files.sourceDir, `**/${config.sourceLang}.${ext}`)
+      : join(files.sourceDir, `**/*.${ext}`),
+  )
+  const allFiles = (await Promise.all(patterns.map((pattern) => glob(pattern)))).flat()
+
+  if (allFiles.length === 0) return
+
+  for (const targetLang of config.targetLangs) {
+    const translator = new Translator({
+      model: config.model,
+      sourceLang: config.sourceLang,
+      targetLang,
+      provider: config.provider,
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      timeout: config.timeout,
+      llm: config.llm,
+      instructionsDir: config.instructionsDir,
+      retranslate: config.retranslate,
+    })
+    const stateStore = new FileStateStore(getFileStateRoot(config), targetLang)
+    await stateStore.load()
+
+    const fileWorkMap = new Map<
+      string,
+      { filePath: string; items: WorkItem[] }
+    >()
+
+    for (const filePath of allFiles) {
+      const items = await collectFileWorkItemsForFile(filePath, config, targetLang, stateStore)
+      if (items.length > 0) {
+        const relPath = relative(files.sourceDir, filePath)
+        fileWorkMap.set(relPath, { filePath, items })
+      }
+    }
+
+    if (fileWorkMap.size === 0) continue
+
+    const results: Array<{ filePath: string; write: () => Promise<void> }> = []
+
+    const tasks = Array.from(fileWorkMap.entries()).map(([relPath, { items }]) => ({
+      title: `${relPath} — ${items.length} groups`,
+      task: async (_ctx: unknown, task: any) => {
+        let done = 0
+        await runConcurrent(items, concurrency, async (item) => {
+          const result = await item.execute(translator)
+          results.push(result)
+          done++
+          task.title = `${relPath} — ${done}/${items.length} groups`
+        })
+        task.title = `${relPath} — ${items.length} groups`
       },
-    },
-    {
-      title: 'Translating',
-      skip: (ctx: any) => ctx.fileList.length === 0 && 'No files found',
-      task: (ctx: any, task: any) =>
-        task.newListr(
-          config.targetLangs.map((targetLang) => ({
-            title: targetLang,
-            task: (_ctx: unknown, langTask: any) =>
-              translateLanguage(ctx.fileList, config, targetLang, langTask, concurrency),
-          })),
-          { concurrent: false },
-        ),
-    },
-  ])
+    }))
+
+    tasks.push({
+      title: 'Writing output',
+      task: async () => {
+        const writesByFile = new Map<string, Array<() => Promise<void>>>()
+        for (const result of results) {
+          if (!writesByFile.has(result.filePath)) {
+            writesByFile.set(result.filePath, [])
+          }
+          writesByFile.get(result.filePath)!.push(result.write)
+        }
+        for (const writers of writesByFile.values()) {
+          for (const write of writers) {
+            await write()
+          }
+        }
+        await stateStore.save()
+      },
+    })
+
+    const listr = new Listr(tasks, {
+      concurrent: false,
+      exitOnError: false,
+      rendererOptions: { collapseSubtasks: true },
+    } as any)
+
+    console.log(`\nFiles → ${targetLang}`)
+    await listr.run()
+  }
 }
 
-async function translateLanguage(
-  allFiles: string[],
-  config: FileTranslateConfig,
-  targetLang: string,
-  langTask: any,
+async function runConcurrent<T>(
+  items: T[],
   concurrency: number,
-): Promise<Listr | void> {
-  const translator = new Translator({
-    model: config.model,
-    temperature: config.temperature,
-    sourceLang: config.sourceLang,
-    targetLang,
-    provider: config.provider,
-    baseUrl: config.baseUrl,
-    apiKey: config.apiKey,
-    llm: config.llm,
-    instructionsDir: config.instructionsDir,
-    retranslate: config.retranslate,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let index = 0
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (index < items.length) {
+      const current = index++
+      await fn(items[current]!)
+    }
   })
-  const stateStore = new FileStateStore(getFileStateRoot(config), targetLang)
-  await stateStore.load()
-
-  const workItems = await collectFileWorkItems(allFiles, config, targetLang, stateStore)
-
-  if (workItems.length === 0) {
-    langTask.skip('nothing changed')
-    return
-  }
-
-  langTask.title = `${targetLang} (${workItems.length} groups)`
-
-  const results: Array<{ filePath: string; write: () => Promise<void> }> = []
-  let hasErrors = false
-
-  return langTask.newListr(
-    [
-      {
-        title: `Translating ${workItems.length} groups`,
-        task: (_ctx: unknown, translateTask: any) =>
-          translateTask.newListr(
-            workItems.map((item) => ({
-              title: item.label,
-              task: async () => {
-                const result = await item.execute(translator)
-                results.push(result)
-              },
-            })),
-            { concurrent: concurrency, exitOnError: false },
-          ),
-        exitAfterRollback: false,
-      },
-      {
-        title: 'Writing output',
-        skip: () => hasErrors && 'Skipped due to translation errors',
-        task: async () => {
-          const writesByFile = new Map<string, Array<() => Promise<void>>>()
-          for (const result of results) {
-            if (!writesByFile.has(result.filePath)) {
-              writesByFile.set(result.filePath, [])
-            }
-            writesByFile.get(result.filePath)!.push(result.write)
-          }
-          for (const writers of writesByFile.values()) {
-            for (const write of writers) {
-              await write()
-            }
-          }
-          await stateStore.save()
-        },
-      },
-    ],
-    { concurrent: false, exitOnError: false },
-  )
+  await Promise.all(workers)
 }
 
 interface WorkItem {
@@ -183,36 +155,23 @@ interface WorkItem {
   execute: (translator: Translator) => Promise<{ filePath: string; write: () => Promise<void> }>
 }
 
-async function collectFileWorkItems(
-  allFiles: string[],
+async function collectFileWorkItemsForFile(
+  filePath: string,
   config: FileTranslateConfig,
   targetLang: string,
   stateStore: FileStateStore,
 ): Promise<WorkItem[]> {
-  const workItems: WorkItem[] = []
+  const ext = extname(filePath)
 
-  for (const filePath of allFiles) {
-    const ext = extname(filePath)
-
-    if (ext === '.md') {
-      const items = await collectMarkdownWorkItems(filePath, config, targetLang, stateStore)
-      workItems.push(...items)
-    } else if (ext === '.json') {
-      const items = await collectJSONWorkItems(filePath, config, targetLang, stateStore)
-      workItems.push(...items)
-    } else if (ext === '.js' || ext === '.ts') {
-      const items = await collectJSWorkItems(
-        filePath,
-        config,
-        targetLang,
-        ext === '.ts',
-        stateStore,
-      )
-      workItems.push(...items)
-    }
+  if (ext === '.md') {
+    return collectMarkdownWorkItems(filePath, config, targetLang, stateStore)
+  } else if (ext === '.json') {
+    return collectJSONWorkItems(filePath, config, targetLang, stateStore)
+  } else if (ext === '.js' || ext === '.ts') {
+    return collectJSWorkItems(filePath, config, targetLang, ext === '.ts', stateStore)
   }
 
-  return workItems
+  return []
 }
 
 function getFileStateRoot(config: FileTranslateConfig): string {
@@ -392,7 +351,7 @@ async function collectJSONWorkItems(
   }
 
   const jsonData = await parseJSON(content)
-  const groups = await extractTranslatableGroups(jsonData)
+  const groups = await extractTranslatableGroups(jsonData, config.files.excludeKeys)
 
   const splitGroups: SplitGroup[] = config.files.maxStringsPerGroup
     ? splitLargeGroups(groups, config.files.maxStringsPerGroup)
@@ -536,7 +495,7 @@ async function collectJSWorkItems(
   }
 
   const ast = await parseJS(content, isTypeScript)
-  const groups = await extractTranslatableGroupsJS(ast)
+  const groups = await extractTranslatableGroupsJS(ast, config.files.excludeKeys)
 
   const splitGroups: SplitJSGroup[] = config.files.maxStringsPerGroup
     ? splitLargeGroupsJS(groups, config.files.maxStringsPerGroup)

@@ -7,7 +7,6 @@ test('should create translator instance', async () => {
 
   const translator = new Translator({
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLang: 'es',
     llm: mockProvider,
@@ -21,7 +20,6 @@ test('should handle empty text', async () => {
 
   const translator = new Translator({
     model: 'test-model',
-    temperature: 0.7,
     sourceLang: 'en',
     targetLang: 'fr',
     llm: mockProvider,

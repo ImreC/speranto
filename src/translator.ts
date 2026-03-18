@@ -7,12 +7,12 @@ import type { TranslatableChunk } from './parsers/md'
 
 interface TranslatorOptions {
   model: string
-  temperature: number
   sourceLang: string
   targetLang: string
   provider?: string
   baseUrl?: string
   apiKey?: string
+  timeout?: number
   llm?: LLMInterface
   instructionsDir?: string
   retranslate?: boolean
@@ -36,6 +36,7 @@ export class Translator {
       apiKey: this.options.apiKey,
       baseUrl: this.options.baseUrl,
       provider: this.options.provider,
+      timeout: this.options.timeout,
     })
   }
 
@@ -78,7 +79,6 @@ export class Translator {
     await this.isModelReady
 
     const response = await this.llm.generate(this.constructPrompt(text), {
-      temperature: this.options.temperature,
     })
     return response.content
   }
@@ -88,7 +88,6 @@ export class Translator {
     await this.isModelReady
 
     const response = await this.llm.generate(this.constructPrompt(chunk.text, chunk.context), {
-      temperature: this.options.temperature,
     })
 
     return response.content
@@ -106,7 +105,6 @@ export class Translator {
     const prompt = this.constructGroupPrompt(groupKey, jsonInput)
 
     const response = await this.llm.generate(prompt, {
-      temperature: this.options.temperature,
     })
 
     return this.parseGroupResponse(response.content, strings)
@@ -151,7 +149,6 @@ export class Translator {
     prompt += `\n\nTranslate the following JSON from ${this.options.sourceLang} to ${this.options.targetLang}:\n\n${JSON.stringify(changedInput, null, 2)}`
 
     const response = await this.llm.generate(prompt, {
-      temperature: this.options.temperature,
     })
 
     return this.parseGroupResponse(response.content, changedStrings)

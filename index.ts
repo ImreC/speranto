@@ -18,7 +18,6 @@ program
     'Path to config file. Looks for speranto.config.ts or speranto.config.js in the current working directory if not specified',
   )
   .option('-m, --model <model>', 'Model to use for translation')
-  .option('-t, --temperature <number>', 'Temperature for translation', parseFloat)
   .option('-s, --source-lang <lang>', 'Source language code')
   .option('-l, --target-langs <langs>', 'Target language codes (comma-separated)', (value) =>
     value.split(','),
@@ -35,13 +34,13 @@ program
 
     const config: Config = {
       model: options.model || passedConfig.model || 'mistral-large-latest',
-      temperature: options.temperature ?? passedConfig.temperature ?? 0.0,
       sourceLang: options.sourceLang || passedConfig.sourceLang || 'en',
       targetLangs: options.targetLangs || passedConfig.targetLangs || ['es'],
       provider: options.provider || passedConfig.provider || 'mistral',
       apiKey: options.apiKey || passedConfig.apiKey,
       baseUrl: options.baseUrl || passedConfig.baseUrl,
       concurrency: options.concurrency ?? passedConfig.concurrency,
+      timeout: passedConfig.timeout,
       verbose: options.verbose || passedConfig.verbose || false,
       instructionsDir: options.instructionsDir || passedConfig.instructionsDir,
       files: passedConfig.files,

@@ -36,3 +36,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .vscode
 
 CLAUDE.md
+
+# example output
+example_content/example.db
+example_content/i18n/es.*
+example_content/i18n/nl.*
+.speranto

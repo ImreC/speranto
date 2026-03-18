@@ -39,7 +39,6 @@ test('sqlite db - orchestrate writes base and translated rows to translation tab
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.0,
     sourceLang: 'en',
     targetLangs: ['es'],
     provider: 'mistral',
@@ -144,7 +143,6 @@ test('sqlite db - orchestrate uses langColumn per row and excludes same-language
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.0,
     sourceLang: 'en',
     targetLangs: ['en', 'es', 'nl'],
     provider: 'mistral',
@@ -211,7 +209,6 @@ test('sqlite db - orchestrate only retranslates changed fields', async () => {
 
   const config: Config = {
     model: 'test-model',
-    temperature: 0.0,
     sourceLang: 'en',
     targetLangs: ['es'],
     provider: 'mistral',
@@ -272,7 +269,6 @@ test('sqlite db - orchestrate respects retranslate=true even when hashes match',
 
   const baseConfig: Config = {
     model: 'test-model',
-    temperature: 0.0,
     sourceLang: 'en',
     targetLangs: ['es'],
     provider: 'mistral',

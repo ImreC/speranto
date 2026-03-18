@@ -3,7 +3,6 @@ import type { Config } from './src/config'
 const config: Config = {
   // LLM Configuration
   model: 'gpt-4o-mini', // or 'mistral-large-latest', 'llama3.2', etc.
-  temperature: 0.0, // 0.0 for consistent translations, higher for more creative
   provider: 'openai', // 'openai' | 'mistral' | 'ollama'
   apiKey: process.env.OPENAI_API_KEY,
 

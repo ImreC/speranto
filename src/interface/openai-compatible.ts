@@ -21,7 +21,7 @@ export class OpenAICompatibleProvider extends LLMInterface {
 
   constructor(
     model: string,
-    options: { apiKey?: string; baseUrl?: string; provider?: string; rateLimitHandler?: RateLimitHandler } = {},
+    options: { apiKey?: string; baseUrl?: string; provider?: string; timeout?: number; rateLimitHandler?: RateLimitHandler } = {},
   ) {
     super(model)
 
@@ -38,7 +38,7 @@ export class OpenAICompatibleProvider extends LLMInterface {
       )
     }
 
-    this.client = new OpenAI({ apiKey: apiKey || '', baseURL, maxRetries: 0 })
+    this.client = new OpenAI({ apiKey: apiKey || '', baseURL, maxRetries: 0, timeout: options.timeout })
     this.rateLimitHandler = options.rateLimitHandler
   }
 
@@ -48,9 +48,7 @@ export class OpenAICompatibleProvider extends LLMInterface {
         const completion = await this.client.chat.completions.create({
           model: this.model,
           messages: [{ role: 'user', content: prompt }],
-          temperature: options?.temperature ?? 0.7,
           max_tokens: options?.maxTokens,
-          top_p: options?.topP,
         })
 
         this.consecutiveRateLimits = 0

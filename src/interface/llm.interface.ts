@@ -1,8 +1,5 @@
 export interface LLMGenerateOptions {
-  temperature?: number
   maxTokens?: number
-  topP?: number
-  topK?: number
   [key: string]: any
 }
 

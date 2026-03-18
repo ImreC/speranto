@@ -37,6 +37,8 @@
     "bump:patch": "bun run scripts/version.ts patch",
     "bump:minor": "bun run scripts/version.ts minor",
     "bump:major": "bun run scripts/version.ts major",
+    "example:seed": "bun run scripts/seed-example-db.ts",
+    "example": "bun run example:seed && cd example_content && bun ../index.ts",
     "test": "LLM_API_KEY=test bun test",
     "test:sqlite": "LLM_API_KEY=test bun test tests/database/sqlite.test.ts",
     "test:postgres": "bun run tests/postgres-test-runner.ts",
