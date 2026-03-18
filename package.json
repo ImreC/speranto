@@ -39,10 +39,8 @@
     "bump:major": "bun run scripts/version.ts major",
     "example:seed": "bun run scripts/seed-example-db.ts",
     "example": "bun run example:seed && cd example_content && bun ../index.ts",
-    "test": "bun run test:no-docker && bun run test:postgres",
-    "test:no-docker": "LLM_API_KEY=test bun test tests/parsers tests/*.test.ts tests/database/sqlite.test.ts tests/database/orchestrate-sqlite.test.ts",
-    "test:postgres": "bun run tests/postgres-test-runner.ts",
-    "test:db:down": "bun run tests/postgres-test-runner.ts down"
+    "docker:up": "docker compose -f tests/docker-compose.yml up -d --wait",
+    "test": "LLM_API_KEY=test bun test"
   },
   "devDependencies": {
     "@types/babel__generator": "^7.27.0",
