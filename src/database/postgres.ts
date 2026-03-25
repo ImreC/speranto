@@ -196,7 +196,7 @@ export class PostgresAdapter extends DatabaseAdapter {
       values,
     )
   }
-  async upsertTranslations(
+  override async upsertTranslations(
     table: TableConfig,
     translations: TranslationRow[],
     suffix: string,

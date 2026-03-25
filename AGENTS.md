@@ -48,6 +48,8 @@ tsc --noEmit
 Note: Tests require `LLM_API_KEY=test`. The package scripts set this automatically;
 for direct `bun test ...` invocations, set it manually.
 
+RUN `tsc --noEmit` AFTER EACH CODE CHANGE AND CHECK FOR ERRORS! 
+
 ## Code Style
 
 ### Formatting (Prettier)

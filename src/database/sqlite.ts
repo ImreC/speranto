@@ -199,7 +199,7 @@ export class SQLiteAdapter extends DatabaseAdapter {
     this.save()
   }
 
-  async upsertTranslations(
+  override async upsertTranslations(
     table: TableConfig,
     translations: TranslationRow[],
     suffix: string,
