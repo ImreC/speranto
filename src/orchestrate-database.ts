@@ -1,6 +1,8 @@
 import { Listr } from 'listr2'
 import {
   createDatabaseAdapter,
+  type DatabaseAdapter,
+  type SourceRow,
   type StoredTranslationRow,
   type TranslationRow,
 } from './database'
@@ -10,6 +12,25 @@ import type { Config, TableConfig } from './types'
 
 interface DatabaseTranslateConfig extends Config {
   database: NonNullable<Config['database']>
+}
+
+interface RowContext {
+  row: SourceRow
+  sourceLang: string
+  hashMetadata: { rowHash: string; fieldHashes: Record<string, string> }
+  rowTranslations: Map<string, StoredTranslationRow>
+}
+
+function prepareRow(
+  row: SourceRow,
+  defaultSourceLang: string,
+  translationsBySourceId: Map<string, Map<string, StoredTranslationRow>>,
+): RowContext {
+  const sourceLang = row.sourceLang || defaultSourceLang
+  const sourceEntries = Object.entries(row.columns).map(([key, value]) => ({ key, value }))
+  const hashMetadata = createHashMetadata(sourceEntries, sourceLang)
+  const rowTranslations = translationsBySourceId.get(String(row.id)) ?? new Map()
+  return { row, sourceLang, hashMetadata, rowTranslations }
 }
 
 export async function orchestrateDatabase(config: Config): Promise<void> {
@@ -27,69 +48,18 @@ export async function orchestrateDatabase(config: Config): Promise<void> {
     await adapter.ensureTranslationTable(table, suffix)
   }
 
+  const processTable = config.init
+    ? (table: TableConfig, targetLang: string, task: any) =>
+        initTable(adapter, table, targetLang, suffix, config.sourceLang, task)
+    : (table: TableConfig, targetLang: string, task: any) =>
+        translateTable(adapter, table, targetLang, suffix, concurrency, dbConfig, translators, task)
+
   for (const targetLang of dbConfig.targetLangs) {
     const tableTasks = dbConfig.database.tables.map((table) => {
       const tableName = table.schema ? `${table.schema}.${table.name}` : table.name
       return {
         title: tableName,
-        task: async (_ctx: unknown, task: any) => {
-          const sourceRows = await adapter.getSourceRows(table)
-          const existingTranslations = await adapter.getTranslations(table, suffix)
-
-          if (sourceRows.length === 0) {
-            task.skip('no source rows')
-            return
-          }
-
-          const translationsBySourceId = buildTranslationIndex(existingTranslations)
-          let done = 0
-          const pendingBaseRows: TranslationRow[] = []
-
-          await runConcurrent(sourceRows, concurrency, async (row) => {
-            const rowTranslations = translationsBySourceId.get(String(row.id)) ?? new Map()
-            const sourceLang = row.sourceLang || config.sourceLang
-            const sourceEntries = Object.entries(row.columns).map(([key, value]) => ({
-              key,
-              value,
-            }))
-            const hashMetadata = createHashMetadata(sourceEntries, sourceLang)
-
-            const baseRow = buildBaseLanguageRow(
-              row,
-              sourceLang,
-              hashMetadata,
-              rowTranslations.get(sourceLang),
-              config.retranslate ?? false,
-            )
-            if (baseRow) pendingBaseRows.push(baseRow)
-
-            const langs = [targetLang].filter((lang) => lang !== sourceLang)
-
-            for (const lang of langs) {
-              const translatedRow = await buildTranslatedRow(
-                row,
-                sourceLang,
-                lang,
-                hashMetadata,
-                rowTranslations.get(lang),
-                dbConfig,
-                translators,
-              )
-              if (translatedRow) {
-                await adapter.upsertTranslation(table, translatedRow, suffix)
-              }
-            }
-
-            done++
-            task.title = `${tableName} — ${done}/${sourceRows.length} rows`
-          })
-
-          if (pendingBaseRows.length > 0) {
-            await adapter.upsertTranslations(table, pendingBaseRows, suffix)
-          }
-
-          task.title = `${tableName} — ${sourceRows.length} rows`
-        },
+        task: (_ctx: unknown, task: any) => processTable(table, targetLang, task),
       }
     })
 
@@ -104,6 +74,102 @@ export async function orchestrateDatabase(config: Config): Promise<void> {
   }
 
   await adapter.close()
+}
+
+async function initTable(
+  adapter: DatabaseAdapter,
+  table: TableConfig,
+  targetLang: string,
+  suffix: string,
+  defaultSourceLang: string,
+  task: any,
+): Promise<void> {
+  const sourceRows = await adapter.getSourceRows(table)
+  const existingTranslations = await adapter.getTranslations(table, suffix)
+
+  if (sourceRows.length === 0) {
+    task.skip('no source rows')
+    return
+  }
+
+  const translationsBySourceId = buildTranslationIndex(existingTranslations)
+  const tableName = table.schema ? `${table.schema}.${table.name}` : table.name
+  const pendingUpserts: TranslationRow[] = []
+
+  for (let i = 0; i < sourceRows.length; i++) {
+    const ctx = prepareRow(sourceRows[i]!, defaultSourceLang, translationsBySourceId)
+
+    // Always write base row on init (stamps hash)
+    const baseRow = buildBaseLanguageRow(ctx, true)
+    if (baseRow) pendingUpserts.push(baseRow)
+
+    // Stamp hashes on existing translations
+    for (const lang of [targetLang].filter((l) => l !== ctx.sourceLang)) {
+      const existing = ctx.rowTranslations.get(lang)
+      if (existing) {
+        pendingUpserts.push({
+          ...existing,
+          rowSourceHash: ctx.hashMetadata.rowHash,
+          fieldSourceHashes: ctx.hashMetadata.fieldHashes,
+        })
+      }
+    }
+
+    task.title = `${tableName} — ${i + 1}/${sourceRows.length} rows`
+  }
+
+  if (pendingUpserts.length > 0) {
+    await adapter.upsertTranslations(table, pendingUpserts, suffix)
+  }
+
+  task.title = `${tableName} — ${sourceRows.length} rows`
+}
+
+async function translateTable(
+  adapter: DatabaseAdapter,
+  table: TableConfig,
+  targetLang: string,
+  suffix: string,
+  concurrency: number,
+  config: DatabaseTranslateConfig,
+  translators: Map<string, Translator>,
+  task: any,
+): Promise<void> {
+  const sourceRows = await adapter.getSourceRows(table)
+  const existingTranslations = await adapter.getTranslations(table, suffix)
+
+  if (sourceRows.length === 0) {
+    task.skip('no source rows')
+    return
+  }
+
+  const translationsBySourceId = buildTranslationIndex(existingTranslations)
+  const tableName = table.schema ? `${table.schema}.${table.name}` : table.name
+  let done = 0
+  const pendingBaseRows: TranslationRow[] = []
+
+  await runConcurrent(sourceRows, concurrency, async (row) => {
+    const ctx = prepareRow(row, config.sourceLang, translationsBySourceId)
+
+    const baseRow = buildBaseLanguageRow(ctx, config.retranslate ?? false)
+    if (baseRow) pendingBaseRows.push(baseRow)
+
+    for (const lang of [targetLang].filter((l) => l !== ctx.sourceLang)) {
+      const translatedRow = await buildTranslatedRow(ctx, lang, config, translators)
+      if (translatedRow) {
+        await adapter.upsertTranslation(table, translatedRow, suffix)
+      }
+    }
+
+    done++
+    task.title = `${tableName} — ${done}/${sourceRows.length} rows`
+  })
+
+  if (pendingBaseRows.length > 0) {
+    await adapter.upsertTranslations(table, pendingBaseRows, suffix)
+  }
+
+  task.title = `${tableName} — ${sourceRows.length} rows`
 }
 
 async function runConcurrent<T>(
@@ -147,52 +213,47 @@ function buildTranslationIndex(
 }
 
 function buildBaseLanguageRow(
-  row: { id: string | number; columns: Record<string, string> },
-  sourceLang: string,
-  hashMetadata: { rowHash: string; fieldHashes: Record<string, string> },
-  existing: StoredTranslationRow | undefined,
-  retranslate: boolean,
+  ctx: RowContext,
+  forceWrite: boolean,
 ): TranslationRow | null {
-  if (!retranslate && existing?.rowSourceHash === hashMetadata.rowHash) {
+  const existing = ctx.rowTranslations.get(ctx.sourceLang)
+  if (!forceWrite && existing?.rowSourceHash === ctx.hashMetadata.rowHash) {
     return null
   }
 
   return {
-    sourceId: row.id,
-    lang: sourceLang,
-    sourceLang,
-    rowSourceHash: hashMetadata.rowHash,
-    fieldSourceHashes: hashMetadata.fieldHashes,
-    columns: { ...row.columns },
+    sourceId: ctx.row.id,
+    lang: ctx.sourceLang,
+    sourceLang: ctx.sourceLang,
+    rowSourceHash: ctx.hashMetadata.rowHash,
+    fieldSourceHashes: ctx.hashMetadata.fieldHashes,
+    columns: { ...ctx.row.columns },
   }
 }
 
 async function buildTranslatedRow(
-  row: { id: string | number; columns: Record<string, string> },
-  sourceLang: string,
+  ctx: RowContext,
   targetLang: string,
-  hashMetadata: { rowHash: string; fieldHashes: Record<string, string> },
-  existing: StoredTranslationRow | undefined,
   config: DatabaseTranslateConfig,
   translators: Map<string, Translator>,
 ): Promise<TranslationRow | null> {
-  if (!config.retranslate && existing?.rowSourceHash === hashMetadata.rowHash) {
+  const existing = ctx.rowTranslations.get(targetLang)
+  if (!config.retranslate && existing?.rowSourceHash === ctx.hashMetadata.rowHash) {
     return null
   }
 
   const translatedColumns = buildTranslatedColumns(
-    row.columns,
-    sourceLang,
-    targetLang,
-    hashMetadata.fieldHashes,
+    ctx.row.columns,
+    ctx.sourceLang,
+    ctx.hashMetadata.fieldHashes,
     existing,
     config.retranslate ?? false,
   )
 
   if (translatedColumns.changed.length > 0) {
-    const translator = getTranslator(translators, config, sourceLang, targetLang)
+    const translator = getTranslator(translators, config, ctx.sourceLang, targetLang)
     const translated = await translator.translateGroupWithContext(
-      `row_${row.id}`,
+      `row_${ctx.row.id}`,
       translatedColumns.changed,
       translatedColumns.context,
     )
@@ -203,11 +264,11 @@ async function buildTranslatedRow(
   }
 
   return {
-    sourceId: row.id,
+    sourceId: ctx.row.id,
     lang: targetLang,
-    sourceLang,
-    rowSourceHash: hashMetadata.rowHash,
-    fieldSourceHashes: hashMetadata.fieldHashes,
+    sourceLang: ctx.sourceLang,
+    rowSourceHash: ctx.hashMetadata.rowHash,
+    fieldSourceHashes: ctx.hashMetadata.fieldHashes,
     columns: translatedColumns.columns,
   }
 }
@@ -215,7 +276,6 @@ async function buildTranslatedRow(
 function buildTranslatedColumns(
   sourceColumns: Record<string, string>,
   sourceLang: string,
-  targetLang: string,
   fieldHashes: Record<string, string>,
   existing: StoredTranslationRow | undefined,
   retranslate: boolean,
