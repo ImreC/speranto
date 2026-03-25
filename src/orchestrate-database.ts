@@ -43,6 +43,7 @@ export async function orchestrateDatabase(config: Config): Promise<void> {
 
           const translationsBySourceId = buildTranslationIndex(existingTranslations)
           let done = 0
+          const pendingBaseRows: TranslationRow[] = []
 
           await runConcurrent(sourceRows, concurrency, async (row) => {
             const rowTranslations = translationsBySourceId.get(String(row.id)) ?? new Map()
@@ -53,23 +54,19 @@ export async function orchestrateDatabase(config: Config): Promise<void> {
             }))
             const hashMetadata = createHashMetadata(sourceEntries, sourceLang)
 
-            await syncBaseLanguageRow(
-              adapter,
-              table,
+            const baseRow = buildBaseLanguageRow(
               row,
               sourceLang,
               hashMetadata,
               rowTranslations.get(sourceLang),
-              suffix,
               config.retranslate ?? false,
             )
+            if (baseRow) pendingBaseRows.push(baseRow)
 
             const langs = [targetLang].filter((lang) => lang !== sourceLang)
 
             for (const lang of langs) {
-              await syncTranslatedRow(
-                adapter,
-                table,
+              const translatedRow = await buildTranslatedRow(
                 row,
                 sourceLang,
                 lang,
@@ -77,13 +74,19 @@ export async function orchestrateDatabase(config: Config): Promise<void> {
                 rowTranslations.get(lang),
                 dbConfig,
                 translators,
-                suffix,
               )
+              if (translatedRow) {
+                await adapter.upsertTranslation(table, translatedRow, suffix)
+              }
             }
 
             done++
             task.title = `${tableName} — ${done}/${sourceRows.length} rows`
           })
+
+          if (pendingBaseRows.length > 0) {
+            await adapter.upsertTranslations(table, pendingBaseRows, suffix)
+          }
 
           task.title = `${tableName} — ${sourceRows.length} rows`
         },
@@ -143,21 +146,18 @@ function buildTranslationIndex(
   return bySourceId
 }
 
-async function syncBaseLanguageRow(
-  adapter: ReturnType<typeof createDatabaseAdapter>,
-  table: TableConfig,
+function buildBaseLanguageRow(
   row: { id: string | number; columns: Record<string, string> },
   sourceLang: string,
   hashMetadata: { rowHash: string; fieldHashes: Record<string, string> },
   existing: StoredTranslationRow | undefined,
-  suffix: string,
   retranslate: boolean,
-): Promise<void> {
+): TranslationRow | null {
   if (!retranslate && existing?.rowSourceHash === hashMetadata.rowHash) {
-    return
+    return null
   }
 
-  const translation: TranslationRow = {
+  return {
     sourceId: row.id,
     lang: sourceLang,
     sourceLang,
@@ -165,13 +165,9 @@ async function syncBaseLanguageRow(
     fieldSourceHashes: hashMetadata.fieldHashes,
     columns: { ...row.columns },
   }
-
-  await adapter.upsertTranslation(table, translation, suffix)
 }
 
-async function syncTranslatedRow(
-  adapter: ReturnType<typeof createDatabaseAdapter>,
-  table: TableConfig,
+async function buildTranslatedRow(
   row: { id: string | number; columns: Record<string, string> },
   sourceLang: string,
   targetLang: string,
@@ -179,10 +175,9 @@ async function syncTranslatedRow(
   existing: StoredTranslationRow | undefined,
   config: DatabaseTranslateConfig,
   translators: Map<string, Translator>,
-  suffix: string,
-): Promise<void> {
+): Promise<TranslationRow | null> {
   if (!config.retranslate && existing?.rowSourceHash === hashMetadata.rowHash) {
-    return
+    return null
   }
 
   const translatedColumns = buildTranslatedColumns(
@@ -207,7 +202,7 @@ async function syncTranslatedRow(
     }
   }
 
-  const translation: TranslationRow = {
+  return {
     sourceId: row.id,
     lang: targetLang,
     sourceLang,
@@ -215,8 +210,6 @@ async function syncTranslatedRow(
     fieldSourceHashes: hashMetadata.fieldHashes,
     columns: translatedColumns.columns,
   }
-
-  await adapter.upsertTranslation(table, translation, suffix)
 }
 
 function buildTranslatedColumns(

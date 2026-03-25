@@ -199,6 +199,55 @@ export class SQLiteAdapter extends DatabaseAdapter {
     this.save()
   }
 
+  async upsertTranslations(
+    table: TableConfig,
+    translations: TranslationRow[],
+    suffix: string,
+  ): Promise<void> {
+    if (!this.db || translations.length === 0) return
+
+    const translationTable = this.getTranslationTableName(table, suffix)
+    const columnNames = Object.keys(translations[0]!.columns)
+    const insertColumns = [
+      'source_id',
+      'lang',
+      'source_lang',
+      'row_source_hash',
+      'field_source_hashes',
+      ...columnNames,
+    ]
+    const columnPlaceholders = insertColumns.map(() => '?').join(', ')
+    const updateSet = [
+      'source_lang = excluded.source_lang',
+      'row_source_hash = excluded.row_source_hash',
+      'field_source_hashes = excluded.field_source_hashes',
+      ...columnNames.map((col) => `${col} = excluded.${col}`),
+    ].join(', ')
+
+    const sql = `
+      INSERT INTO ${translationTable} (${insertColumns.join(', ')}, updated_at)
+      VALUES (${columnPlaceholders}, CURRENT_TIMESTAMP)
+      ON CONFLICT(source_id, lang) DO UPDATE SET
+        ${updateSet},
+        updated_at = CURRENT_TIMESTAMP
+    `
+
+    this.db.run('BEGIN TRANSACTION')
+    for (const translation of translations) {
+      const values = [
+        String(translation.sourceId),
+        translation.lang,
+        translation.sourceLang,
+        translation.rowSourceHash,
+        JSON.stringify(translation.fieldSourceHashes),
+        ...columnNames.map((col) => translation.columns[col] ?? ''),
+      ]
+      this.db.run(sql, values)
+    }
+    this.db.run('COMMIT')
+    this.save()
+  }
+
   private ensureMetadataColumns(translationTable: string): void {
     if (!this.db) throw new Error('Database not connected')
 

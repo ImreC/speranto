@@ -35,4 +35,14 @@ export abstract class DatabaseAdapter {
     translation: TranslationRow,
     suffix: string,
   ): Promise<void>
+
+  async upsertTranslations(
+    table: TableConfig,
+    translations: TranslationRow[],
+    suffix: string,
+  ): Promise<void> {
+    for (const translation of translations) {
+      await this.upsertTranslation(table, translation, suffix)
+    }
+  }
 }

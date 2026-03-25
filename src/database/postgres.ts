@@ -196,6 +196,24 @@ export class PostgresAdapter extends DatabaseAdapter {
       values,
     )
   }
+  async upsertTranslations(
+    table: TableConfig,
+    translations: TranslationRow[],
+    suffix: string,
+  ): Promise<void> {
+    if (!this.client || translations.length === 0) return
+
+    await this.client.query('BEGIN')
+    try {
+      for (const translation of translations) {
+        await this.upsertTranslation(table, translation, suffix)
+      }
+      await this.client.query('COMMIT')
+    } catch (err) {
+      await this.client.query('ROLLBACK')
+      throw err
+    }
+  }
 }
 
 function parseFieldHashes(value: unknown): Record<string, string> {

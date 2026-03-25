@@ -1,6 +1,6 @@
 {
   "name": "@speranto/speranto",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "license": "MIT",
   "author": "Imre Gelens",
   "homepage": "https://github.com/ImreC/speranto",
@@ -39,8 +39,8 @@
     "bump:major": "bun run scripts/version.ts major",
     "example:seed": "bun run scripts/seed-example-db.ts",
     "example": "bun run example:seed && cd example_content && bun ../index.ts",
-    "docker:up": "docker compose -f tests/docker-compose.yml up -d --wait",
-    "test": "LLM_API_KEY=test bun test"
+    "docker:up": "docker compose -p speranto -f tests/docker-compose.yml up -d --wait",
+    "test": "bun run docker:up && LLM_API_KEY=test bun test"
   },
   "devDependencies": {
     "@types/babel__generator": "^7.27.0",
