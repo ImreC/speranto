@@ -132,6 +132,36 @@ const config = {
   expect(outputContent).toContain('config')
 })
 
+test('translate should keep duplicate JavaScript property paths distinct', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  mockProvider.setMockResponse('First title', 'Primer título')
+  mockProvider.setMockResponse('Second title', 'Segundo título')
+
+  const jsContent = `
+export const first = { title: "First title" }
+export const second = { title: "Second title" }
+`
+  await writeFile(join(sourceDir, 'messages.js'), jsContent)
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
+  }
+
+  await orchestrate(config, '0.1.2')
+
+  const outputContent = await readFile(join(targetDir, 'es', 'messages.js'), 'utf-8')
+  expect(outputContent).toContain('Primer título')
+  expect(outputContent).toContain('Segundo título')
+})
+
 test('translate should handle TypeScript files', async () => {
   const mockProvider = new MockLLMProvider('test-model')
 
@@ -300,7 +330,10 @@ test('translate should restore markdown output from sidecar state without retran
     callCount++
     return originalGenerate(...args)
   }
-  mockProvider.setMockResponse('# Hello World\n\nWelcome to our app.', '# Hola Mundo\n\nBienvenido a nuestra app.')
+  mockProvider.setMockResponse(
+    '# Hello World\n\nWelcome to our app.',
+    '# Hola Mundo\n\nBienvenido a nuestra app.',
+  )
 
   await writeFile(join(sourceDir, 'test.md'), '# Hello World\n\nWelcome to our app.')
 
@@ -729,4 +762,47 @@ test('after init, changing source should trigger retranslation of changed groups
   const output = JSON.parse(await readFile(join(esTargetDir, 'test.json'), 'utf-8'))
   expect(output.nav.welcome).toBe('Bienvenido')
   expect(output.footer.copyright).toBe('Derechos reservados 2024')
+})
+
+test('translation failures should not write partial output or skip the next retry', async () => {
+  const mockProvider = new MockLLMProvider('test-model')
+  mockProvider.setMockResponse('Success', 'Éxito')
+  mockProvider.setMockResponse('Retry me', 'Reintentar')
+  const generate = mockProvider.generate.bind(mockProvider)
+  let shouldFail = true
+
+  mockProvider.generate = async (prompt, options) => {
+    if (shouldFail && prompt.includes('Retry me')) {
+      throw new Error('Temporary translation failure')
+    }
+    return generate(prompt, options)
+  }
+
+  await writeFile(
+    join(sourceDir, 'test.json'),
+    JSON.stringify({ first: { value: 'Success' }, second: { value: 'Retry me' } }),
+  )
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    concurrency: 1,
+    llm: mockProvider,
+    files: {
+      sourceDir,
+      targetDir: join(targetDir, '[lang]'),
+    },
+  }
+
+  await expect(orchestrate(config, '0.1.2')).rejects.toThrow()
+  expect(existsSync(join(targetDir, 'es', 'test.json'))).toBe(false)
+
+  shouldFail = false
+  await orchestrate(config, '0.1.2')
+
+  const output = JSON.parse(await readFile(join(targetDir, 'es', 'test.json'), 'utf-8'))
+  expect(output.first.value).toBe('Éxito')
+  expect(output.second.value).toBe('Reintentar')
 })

@@ -101,8 +101,6 @@ test('Translator should include language instructions in prompt', async () => {
     llm: mockProvider,
   })
 
-  await new Promise((resolve) => setTimeout(resolve, 50))
-
   await translator.translateText('Hello')
 
   expect(capturedPrompt).toContain('Use informal tone for Spanish translations')

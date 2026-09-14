@@ -7,6 +7,7 @@ import {
   type TranslationRow,
 } from './database'
 import { Translator } from './translator'
+import { resolveConcurrency } from './util/concurrency'
 import { createHashMetadata, type HashEntry } from './util/hash'
 import type { Config, TableConfig } from './types'
 
@@ -38,42 +39,57 @@ export async function orchestrateDatabase(config: Config): Promise<void> {
 
   const dbConfig = config as DatabaseTranslateConfig
   const suffix = dbConfig.database.translationTableSuffix || '_translations'
-  const concurrency = dbConfig.concurrency ?? dbConfig.database.concurrency ?? 5
+  const databaseConcurrency = dbConfig.database.concurrency
+  const concurrency = resolveConcurrency(
+    databaseConcurrency ?? dbConfig.concurrency,
+    10,
+    databaseConcurrency === undefined ? 'concurrency' : 'database.concurrency',
+  )
   const adapter = createDatabaseAdapter(dbConfig.database)
   const translators = new Map<string, Translator>()
 
   await adapter.connect()
+  try {
+    for (const table of dbConfig.database.tables) {
+      await adapter.ensureTranslationTable(table, suffix)
+    }
 
-  for (const table of dbConfig.database.tables) {
-    await adapter.ensureTranslationTable(table, suffix)
+    const processTable = config.init
+      ? (table: TableConfig, targetLang: string, task: any) =>
+          initTable(adapter, table, targetLang, suffix, config.sourceLang, task)
+      : (table: TableConfig, targetLang: string, task: any) =>
+          translateTable(
+            adapter,
+            table,
+            targetLang,
+            suffix,
+            concurrency,
+            dbConfig,
+            translators,
+            task,
+          )
+
+    for (const targetLang of dbConfig.targetLangs) {
+      const tableTasks = dbConfig.database.tables.map((table) => {
+        const tableName = table.schema ? `${table.schema}.${table.name}` : table.name
+        return {
+          title: tableName,
+          task: (_ctx: unknown, task: any) => processTable(table, targetLang, task),
+        }
+      })
+
+      const listr = new Listr(tableTasks, {
+        concurrent: false,
+        exitOnError: true,
+        rendererOptions: { collapseSubtasks: true },
+      } as any)
+
+      console.log(`\nDatabase → ${targetLang}`)
+      await listr.run()
+    }
+  } finally {
+    await adapter.close()
   }
-
-  const processTable = config.init
-    ? (table: TableConfig, targetLang: string, task: any) =>
-        initTable(adapter, table, targetLang, suffix, config.sourceLang, task)
-    : (table: TableConfig, targetLang: string, task: any) =>
-        translateTable(adapter, table, targetLang, suffix, concurrency, dbConfig, translators, task)
-
-  for (const targetLang of dbConfig.targetLangs) {
-    const tableTasks = dbConfig.database.tables.map((table) => {
-      const tableName = table.schema ? `${table.schema}.${table.name}` : table.name
-      return {
-        title: tableName,
-        task: (_ctx: unknown, task: any) => processTable(table, targetLang, task),
-      }
-    })
-
-    const listr = new Listr(tableTasks, {
-      concurrent: false,
-      exitOnError: false,
-      rendererOptions: { collapseSubtasks: true },
-    } as any)
-
-    console.log(`\nDatabase → ${targetLang}`)
-    await listr.run()
-  }
-
-  await adapter.close()
 }
 
 async function initTable(
@@ -192,7 +208,7 @@ async function runConcurrent<T>(
   await Promise.all(workers)
   if (errors.length > 0) {
     const msg = `${errors.length} item(s) failed: ${errors.map((e) => e.message).join('; ')}`
-    console.warn(msg)
+    throw new AggregateError(errors, msg)
   }
 }
 
@@ -212,10 +228,7 @@ function buildTranslationIndex(
   return bySourceId
 }
 
-function buildBaseLanguageRow(
-  ctx: RowContext,
-  forceWrite: boolean,
-): TranslationRow | null {
+function buildBaseLanguageRow(ctx: RowContext, forceWrite: boolean): TranslationRow | null {
   const existing = ctx.rowTranslations.get(ctx.sourceLang)
   if (!forceWrite && existing?.rowSourceHash === ctx.hashMetadata.rowHash) {
     return null

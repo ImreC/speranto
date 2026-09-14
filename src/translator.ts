@@ -22,13 +22,14 @@ export class Translator {
   private options: TranslatorOptions
   private languageInstructions: string | null = null
   private llm: LLMInterface
-  private isModelReady: Promise<boolean>
+  private ready: Promise<void>
 
   constructor(options: TranslatorOptions) {
     this.options = options
     this.llm = options.llm ?? this.createLLMProvider()
-    this.isModelReady = this.llm.isModelLoaded()
-    this.loadLanguageInstructions()
+    this.ready = Promise.all([this.llm.isModelLoaded(), this.loadLanguageInstructions()]).then(
+      () => undefined,
+    )
   }
 
   private createLLMProvider(): LLMInterface {
@@ -76,19 +77,20 @@ export class Translator {
 
   async translateText(text: string): Promise<string> {
     if (!text.trim()) return text
-    await this.isModelReady
+    await this.ready
 
-    const response = await this.llm.generate(this.constructPrompt(text), {
-    })
+    const response = await this.llm.generate(this.constructPrompt(text), {})
     return response.content
   }
 
   async translateChunk(chunk: TranslatableChunk): Promise<string> {
     if (!chunk.text.trim()) return chunk.text
-    await this.isModelReady
+    await this.ready
 
-    const response = await this.llm.generate(this.constructPrompt(chunk.text, chunk.context), {
-    })
+    const response = await this.llm.generate(
+      this.constructPrompt(chunk.text, chunk.context),
+      {},
+    )
 
     return response.content
   }
@@ -98,14 +100,13 @@ export class Translator {
     strings: Array<{ key: string; value: string }>,
   ): Promise<Array<{ key: string; value: string }>> {
     if (strings.length === 0) return strings
-    await this.isModelReady
+    await this.ready
 
     const jsonInput = Object.fromEntries(strings.map(({ key, value }) => [key, value]))
 
     const prompt = this.constructGroupPrompt(groupKey, jsonInput)
 
-    const response = await this.llm.generate(prompt, {
-    })
+    const response = await this.llm.generate(prompt, {})
 
     return this.parseGroupResponse(response.content, strings)
   }
@@ -116,7 +117,7 @@ export class Translator {
     contextStrings: Array<{ key: string; value: string }>,
   ): Promise<Array<{ key: string; value: string }>> {
     if (changedStrings.length === 0) return changedStrings
-    await this.isModelReady
+    await this.ready
 
     const changedInput = Object.fromEntries(
       changedStrings.map(({ key, value }) => [key, value]),
@@ -148,8 +149,7 @@ export class Translator {
 
     prompt += `\n\nTranslate the following JSON from ${this.options.sourceLang} to ${this.options.targetLang}:\n\n${JSON.stringify(changedInput, null, 2)}`
 
-    const response = await this.llm.generate(prompt, {
-    })
+    const response = await this.llm.generate(prompt, {})
 
     return this.parseGroupResponse(response.content, changedStrings)
   }
@@ -194,20 +194,35 @@ export class Translator {
     }
     cleaned = cleaned.trim()
 
+    let parsed: unknown
     try {
-      const parsed = JSON.parse(cleaned) as Record<string, unknown>
-      return originalStrings.map(({ key }) => {
-        const raw = parsed[key]
-        const value =
-          typeof raw === 'string'
-            ? raw
-            : raw && typeof raw === 'object' && 'value' in raw && typeof (raw as any).value === 'string'
-              ? (raw as any).value
-              : originalStrings.find((s) => s.key === key)?.value ?? ''
-        return { key, value }
-      })
+      parsed = JSON.parse(cleaned)
     } catch {
-      throw new Error(`Failed to parse group translation response as JSON: ${cleaned.slice(0, 100)}`)
+      throw new Error(
+        `Failed to parse group translation response as JSON: ${cleaned.slice(0, 100)}`,
+      )
     }
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Group translation response must be a JSON object')
+    }
+
+    return originalStrings.map(({ key }) => {
+      const raw = (parsed as Record<string, unknown>)[key]
+      const value =
+        typeof raw === 'string'
+          ? raw
+          : raw && typeof raw === 'object' && 'value' in raw && typeof raw.value === 'string'
+            ? raw.value
+            : undefined
+
+      if (value === undefined) {
+        throw new Error(
+          `Group translation response is missing a string value for key "${key}"`,
+        )
+      }
+
+      return { key, value }
+    })
   }
 }

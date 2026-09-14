@@ -23,14 +23,11 @@ Use Bun instead of Node.js for all tooling:
 # Install dependencies
 bun install
 
-# Run test 
-bun run docker:up
+# Start PostgreSQL and run the complete test suite
 bun run test
 
-
-
 # Stop the PostgreSQL Docker container
-bun run test:db:down
+docker compose -p speranto -f tests/docker-compose.yml down
 
 # Run a single test file
 LLM_API_KEY=test bun test tests/translator.test.ts
@@ -42,13 +39,14 @@ LLM_API_KEY=test bun test --filter "parseJSON"
 bun run build
 
 # Type check (no emit)
-tsc --noEmit
+bunx tsc --noEmit
 ```
 
-Note: Tests require `LLM_API_KEY=test`. The package scripts set this automatically;
-for direct `bun test ...` invocations, set it manually.
+`bun run test` starts the PostgreSQL 16 container and sets `LLM_API_KEY=test`. For direct
+`bun test ...` invocations, set that environment variable manually. PostgreSQL tests also require
+the container, which can be started independently with `bun run docker:up`.
 
-RUN `tsc --noEmit` AFTER EACH CODE CHANGE AND CHECK FOR ERRORS! 
+Run `bunx tsc --noEmit` after each code change and check for errors.
 
 ## Code Style
 
@@ -77,6 +75,7 @@ const config: Config = {
 ### Imports
 
 Order imports as follows:
+
 1. Node.js built-in modules (use `node:` prefix)
 2. External packages
 3. Internal modules (relative paths)
@@ -147,6 +146,7 @@ if (!key) {
 ### Comments
 
 Avoid comments. Prefer:
+
 - Clear, descriptive function names
 - Good code splitting into small functions
 - Self-documenting code
@@ -175,6 +175,7 @@ Bun.write()
 ### Test/Build Code
 
 Bun-specific APIs are allowed in:
+
 - Test files (`tests/`)
 - Build scripts (`tsdown.config.ts`)
 - Development tooling
@@ -193,30 +194,35 @@ Bun-specific APIs are allowed in:
 # Run all tests
 bun run test
 
-# If postgres tests fail, start the container first
+# Start PostgreSQL without running tests
 bun run docker:up
-bun run test
+
+# Run the PostgreSQL adapter tests directly after starting the container
+LLM_API_KEY=test bun test tests/database/postgres.test.ts
 ```
 
-`bun run test` runs `LLM_API_KEY=test bun test` which discovers all test files automatically.
-PostgreSQL tests need a running postgres instance — if they fail with
-`PostgresError: Connection closed`, run `bun run docker:up` first. This starts PostgreSQL 16
-via `tests/docker-compose.yml` (port 5432, user/pass: test/test, db: speranto_test).
-
-In CI, both workflows run `bun run docker:up && bun run test` with a postgres service container.
+`bun run test` runs `bun run docker:up && LLM_API_KEY=test bun test`, which discovers all test
+files automatically. PostgreSQL runs from `tests/docker-compose.yml` on port 5432 with user/password
+`test` and database `speranto_test`.
 
 ### Test Files Overview
 
 - `tests/translate.test.ts` — End-to-end file translation orchestration (JSON, JS/TS, Markdown).
-  Tests hash-based skip logic, partial retranslation, sidecar state restoration, and `retranslate` flag.
+  Tests hash-based skip logic, partial retranslation, sidecar state restoration, failure
+  propagation, duplicate JS property paths, and the `retranslate` flag.
 - `tests/database/orchestrate-sqlite.test.ts` — End-to-end database translation orchestration
   using SQLite. Tests duplicate row prevention, hash-based skip, partial field retranslation,
-  `langColumn` per-row source language, and `retranslate` flag.
+  `langColumn` per-row source language, concurrency precedence, cleanup after failures, and the
+  `retranslate` flag.
 - `tests/database/sqlite.test.ts` — SQLite adapter unit tests (CRUD, upsert, table creation).
 - `tests/database/postgres.test.ts` — PostgreSQL adapter unit tests (same interface as SQLite).
-- `tests/parsers/*.test.ts` — Parser unit tests for JSON, JS/TS, and Markdown.
-- `tests/translator.test.ts` — Translator class tests (prompt construction, LLM interaction).
+- `tests/parsers/*.test.ts` — Parser unit tests for JSON, JS/TS, and Markdown, including mixed JS
+  literal reconstruction.
+- `tests/translator.test.ts` — Translator tests for prompt construction, asynchronous setup, LLM
+  interaction, and strict response validation.
 - `tests/providers.test.ts` — LLM provider instantiation tests.
+- `tests/cli.test.ts` — CLI tests for configuration-driven init mode and option validation.
+- `tests/util/concurrency.test.ts` — Concurrency defaulting and validation tests.
 
 ### Mocking
 
@@ -229,6 +235,7 @@ The codebase uses SHA256 hashes at row and field level to skip unchanged transla
 Tests verify this at two levels:
 
 **File orchestration** (`translate.test.ts`):
+
 - Unchanged JSON groups produce 0 LLM calls on second run
 - Adding a key to a group triggers retranslation of only that group
 - Unchanged JS groups are skipped; changed groups are retranslated
@@ -236,12 +243,14 @@ Tests verify this at two levels:
 - `retranslate: true` forces retranslation regardless of hashes
 
 **Database orchestration** (`orchestrate-sqlite.test.ts`):
+
 - Unchanged rows produce 0 LLM calls on second run
 - Changed fields trigger retranslation; unchanged fields are reused
 - Multiple runs with `retranslate: true` do not create duplicate rows (upsert on source_id+lang)
 - `retranslate: true` forces retranslation regardless of hashes
 
 **Adapter level** (`sqlite.test.ts`, `postgres.test.ts`):
+
 - `upsertTranslation` with same source_id+lang updates the existing row (no duplicates)
 
 ## Project Structure
@@ -268,10 +277,13 @@ src/
 │   ├── js.ts         # JS/TS parser (Babel)
 │   └── md.ts         # Markdown parser (Remark)
 └── util/
-    ├── config.ts     # Config file loading utility
-    ├── hash.ts       # Shared row/group hash helpers
-    └── file-state.ts # Sidecar file translation state
+    ├── concurrency.ts # Concurrency defaulting and validation
+    ├── config.ts      # Config file loading utility
+    ├── file-state.ts  # Sidecar file translation state
+    └── hash.ts        # Shared row/group hash helpers
 tests/
+├── cli.test.ts
+├── docker-compose.yml    # PostgreSQL for database tests
 ├── mocks/
 │   ├── LLMProvider.ts    # Mock LLM provider
 │   └── BunFile.ts
@@ -283,10 +295,11 @@ tests/
 │   ├── json.test.ts
 │   ├── js.test.ts
 │   └── md.test.ts
-├── translator.test.ts
-├── translate.test.ts
 ├── providers.test.ts
-└── docker-compose.yml    # PostgreSQL for database tests
+├── translate.test.ts
+├── translator.test.ts
+└── util/
+    └── concurrency.test.ts
 ```
 
 ## Architecture Notes
@@ -297,19 +310,25 @@ tests/
 - `DatabaseAdapter` is the abstract base class for database backends
 - Parsers extract translatable strings and reconstruct files after translation
 - Translation is orchestrated via Listr2 for progress display
+- Translation failures propagate to the CLI, which exits non-zero; failed file groups do not
+  update output files or sidecar state
 - Database translations store base-language rows in translation tables, making them the canonical
   read model for all languages
 - Database change detection uses row-level and per-field hashes
 - File translation state is stored in a sidecar `.speranto/` directory (relative to `process.cwd()`)
   and uses hash-based file/group/chunk detection
-- `--init` populates state from existing source+target pairs without calling the LLM
+- `--init` or `init: true` populates state from existing source+target pairs without calling the LLM
 - `excludeKeys` in file config skips specified leaf keys from translation (e.g., `localizedSlug`).
   For JSON files, excluded keys are merged back from existing target files via `mergeExcludedKeys`.
   For JS/TS files, excluded key values are preserved from existing target files via positional
   matching in `collectJSWorkItems`
-- `parseGroupResponse` in the Translator validates that LLM responses contain string values. If
-  the LLM returns an object with a `value` property instead of a plain string, the string is
-  extracted automatically
-- Set `concurrency: 1` to process translations sequentially on low rate-limit setups
+- Duplicate JS/TS property paths are assigned unique translation keys so every occurrence can be
+  reconstructed correctly
+- `parseGroupResponse` requires valid JSON with every requested key and string value. An object
+  with a string `value` property is also accepted for provider compatibility
+- Concurrency values must be positive integers. Top-level `concurrency` defaults to 5;
+  `database.concurrency` overrides it for database work and defaults to 10 when neither is set.
+  Set the relevant value to 1 for sequential processing on low rate-limit setups
 - Default provider is `mistral` with model `mistral-large-latest`
-- CLI options override config file values; config loaded from `speranto.config.ts` or `.js`
+- CLI options override config file values; config is loaded from `speranto.config.ts` or `.js`
+- Verbose output redacts API keys and database connection strings

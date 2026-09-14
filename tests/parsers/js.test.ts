@@ -1,5 +1,10 @@
 import { test, expect } from 'bun:test'
-import { parseJS, extractTranslatableStringsJS, extractTranslatableGroupsJS, reconstructJS } from '../../src/parsers/js'
+import {
+  parseJS,
+  extractTranslatableStringsJS,
+  extractTranslatableGroupsJS,
+  reconstructJS,
+} from '../../src/parsers/js'
 
 test('parseJS should parse JavaScript code', async () => {
   const content = `const config = { title: "Hello", description: "Welcome" };`
@@ -92,6 +97,28 @@ const config = {
   expect(result).toContain('`Bienvenido`')
 })
 
+test('reconstructJS should preserve extraction identities when string types are mixed', async () => {
+  const content = `
+const config = {
+  title: "First",
+  subtitle: \`Second\`,
+  description: "Third"
+};`
+
+  const ast = await parseJS(content)
+  const strings = await extractTranslatableStringsJS(ast)
+  const translations = strings.map((string, index) => ({
+    path: string.path,
+    value: `Translated ${index + 1}`,
+  }))
+
+  const result = await reconstructJS(ast, translations)
+
+  expect(result).toContain('"Translated 1"')
+  expect(result).toContain('`Translated 2`')
+  expect(result).toContain('"Translated 3"')
+})
+
 test('extractTranslatableGroupsJS should group nested objects', async () => {
   const content = `
     export default {
@@ -113,16 +140,16 @@ test('extractTranslatableGroupsJS should group nested objects', async () => {
 
   expect(groups).toHaveLength(3)
 
-  const rootGroup = groups.find(g => g.groupKey === '_root')
+  const rootGroup = groups.find((g) => g.groupKey === '_root')
   expect(rootGroup).toBeDefined()
   expect(rootGroup!.strings).toHaveLength(1)
 
-  const navGroup = groups.find(g => g.groupKey === 'nav')
+  const navGroup = groups.find((g) => g.groupKey === 'nav')
   expect(navGroup).toBeDefined()
   expect(navGroup!.strings).toHaveLength(3)
-  expect(navGroup!.strings.map(s => s.value)).toContain('Home')
+  expect(navGroup!.strings.map((s) => s.value)).toContain('Home')
 
-  const footerGroup = groups.find(g => g.groupKey === 'footer')
+  const footerGroup = groups.find((g) => g.groupKey === 'footer')
   expect(footerGroup).toBeDefined()
   expect(footerGroup!.strings).toHaveLength(2)
 })

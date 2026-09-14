@@ -3,8 +3,12 @@ import type { Config } from './src/config'
 const config: Config = {
   // LLM Configuration
   model: 'gpt-4o-mini', // or 'mistral-large-latest', 'llama3.2', etc.
-  provider: 'openai', // 'openai' | 'mistral' | 'ollama'
+  provider: 'openai', // 'openai', 'mistral', 'ollama', or another OpenAI-compatible provider
   apiKey: process.env.OPENAI_API_KEY,
+  // baseUrl: 'https://my-llm.example.com/v1',
+  concurrency: 5,
+  timeout: 600_000,
+  verbose: false,
 
   // Language Settings
   sourceLang: 'en',
@@ -20,12 +24,13 @@ const config: Config = {
     targetDir: './src/i18n/languages', // Use same dir with useLangCodeAsFilename
     useLangCodeAsFilename: true, // en.json -> es.json, fr.json, etc.
     maxStringsPerGroup: 200, // Split large files into smaller batches
+    // excludeKeys: ['localizedSlug'],
   },
 
   // Database Translation (optional, can use alongside files)
   // database: {
   //   type: 'postgres',
-  //   connection: process.env.DATABASE_URL,
+  //   connection: process.env.DATABASE_URL!,
   //   tables: [
   //     {
   //       name: 'articles',
@@ -40,8 +45,11 @@ const config: Config = {
   //     },
   //   ],
   //   translationTableSuffix: '_translations',
-  //   concurrency: 10,
+  //   concurrency: 10, // Overrides top-level concurrency for database rows
   // },
+
+  retranslate: false,
+  init: false,
 }
 
 export default config

@@ -1,6 +1,10 @@
 # Speranto
 
-A quick and simple machine translation tool for i18n in webapps. Named after Esperanto, the universal European language, Speranto helps you translate your content across multiple languages with ease.
+A quick and simple machine translation tool for i18n in web apps. Named after Esperanto, the
+universal European language, Speranto helps you translate content across multiple languages.
+
+The published CLI runs with [Bun](https://bun.sh/), while its runtime code uses Node-compatible
+APIs so the package can be consumed from Node-compatible projects.
 
 ## Installation
 
@@ -27,6 +31,18 @@ import type { Config } from '@speranto/speranto'
 ```
 
 ## Development
+
+Install dependencies, type-check, test, and build with Bun:
+
+```bash
+bun install
+bunx tsc --noEmit
+bun run test
+bun run build
+```
+
+`bun run test` starts the PostgreSQL 16 test container and runs the complete suite with
+`LLM_API_KEY=test`. For a direct `bun test` command, set that environment variable yourself.
 
 ### Versioning
 
@@ -63,7 +79,9 @@ speranto
 
 ### Configuration
 
-**Creating a configuration file is strongly recommended.** Speranto will look for a configuration file in your workspace:
+**Creating a configuration file is strongly recommended.** Speranto looks for a configuration
+file in your workspace:
+
 - `speranto.config.ts` (TypeScript, recommended)
 - `speranto.config.js` (JavaScript)
 
@@ -105,42 +123,47 @@ const config = {
   },
 }
 
-module.exports = config
+export default config
 ```
 
 #### Configuration Options
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `model` | `string` | The AI model to use for translation |
-| `sourceLang` | `string` | Source language code (e.g., `'en'` for English) |
-| `targetLangs` | `string[]` | Array of target language codes |
-| `provider` | `string` | LLM provider: `'openai'`, `'ollama'`, `'mistral'`, or any OpenAI-compatible |
-| `apiKey` | `string` | API key for the LLM provider |
-| `baseUrl` | `string` | Base URL for OpenAI-compatible APIs (overrides provider default) |
-| `concurrency` | `number` | Maximum concurrent LLM calls (default: `5`) |
-| `timeout` | `number` | Request timeout in milliseconds (default: `600000` / 10 minutes) |
-| `retranslate` | `boolean` | Force retranslation of all values, even if already translated |
-| `init` | `boolean` | Build state from existing translations without translating |
-| `instructionsDir` | `string` | Directory containing language-specific instruction files (see below) |
+| Option            | Type       | Description                                                                 |
+| ----------------- | ---------- | --------------------------------------------------------------------------- |
+| `model`           | `string`   | The AI model to use for translation                                         |
+| `sourceLang`      | `string`   | Source language code (e.g., `'en'` for English)                             |
+| `targetLangs`     | `string[]` | Array of target language codes                                              |
+| `provider`        | `string`   | LLM provider: `'openai'`, `'ollama'`, `'mistral'`, or any OpenAI-compatible |
+| `apiKey`          | `string`   | API key for the LLM provider                                                |
+| `baseUrl`         | `string`   | Base URL for OpenAI-compatible APIs (overrides provider default)            |
+| `concurrency`     | `number`   | Positive integer limiting concurrent LLM calls (default: `5`)               |
+| `timeout`         | `number`   | Request timeout in milliseconds (default: `600000` / 10 minutes)            |
+| `verbose`         | `boolean`  | Print the resolved configuration with secrets redacted                      |
+| `retranslate`     | `boolean`  | Force retranslation of all values, even if already translated               |
+| `init`            | `boolean`  | Build state from existing translations without translating                  |
+| `instructionsDir` | `string`   | Directory containing language-specific instruction files (see below)        |
 
 #### File Translation Options (`files`)
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `sourceDir` | `string` | Directory containing source files |
-| `targetDir` | `string` | Output directory pattern (use `[lang]` as placeholder) |
-| `useLangCodeAsFilename` | `boolean` | Use language code as filename (e.g., `en.json` → `es.json`) |
-| `maxStringsPerGroup` | `number` | Maximum strings per translation batch (helps with large files) |
-| `excludeKeys` | `string[]` | Field names to exclude from translation (matched against leaf keys) |
+| Option                  | Type       | Description                                                         |
+| ----------------------- | ---------- | ------------------------------------------------------------------- |
+| `sourceDir`             | `string`   | Directory containing source files                                   |
+| `targetDir`             | `string`   | Output directory pattern (use `[lang]` as placeholder)              |
+| `useLangCodeAsFilename` | `boolean`  | Use language code as filename (e.g., `en.json` → `es.json`)         |
+| `maxStringsPerGroup`    | `number`   | Maximum strings per translation batch (helps with large files)      |
+| `excludeKeys`           | `string[]` | Field names to exclude from translation (matched against leaf keys) |
 
 Speranto keeps file translation state in a sidecar `.speranto/` directory so it can use
 hash-based change detection. That lets it skip unchanged files quickly and only retranslate changed
 groups/chunks on later runs.
 
+Translation failures are reported as errors and cause a non-zero CLI exit. Speranto validates
+group responses before updating output or sidecar state, so failed groups remain safe to retry.
+
 ### Language-Specific Instructions
 
-You can provide custom translation instructions for each target language by creating markdown files in an instructions directory:
+You can provide custom translation instructions for each target language by creating Markdown
+files in an instructions directory:
 
 ```
 instructions/
@@ -190,7 +213,7 @@ speranto --init
 
 # All available options
 speranto \
-  -c, --config <path>              # Path to config file (default: ./speranto.config.ts)
+  -c, --config <path>              # Path to config file (auto-detects .ts or .js when omitted)
   -m, --model <model>              # Model to use for translation
   -s, --source-lang <lang>         # Source language code
   -l, --target-langs <langs>       # Target language codes (comma-separated)
@@ -206,7 +229,8 @@ speranto \
 
 ## Database Translation
 
-Speranto can also translate content stored in database tables. This is useful for CMS systems or applications that store translatable content in a database.
+Speranto can also translate content stored in database tables. This is useful for CMS systems or
+applications that store translatable content in a database.
 
 Simply add a `database` section to your config file alongside or instead of `files`:
 
@@ -221,22 +245,22 @@ const config: Config = {
   provider: 'openai',
   apiKey: process.env.OPENAI_API_KEY,
   database: {
-    type: 'postgres',  // 'sqlite' or 'postgres'
-    connection: process.env.DATABASE_URL,
+    type: 'postgres', // 'sqlite' or 'postgres'
+    connection: process.env.DATABASE_URL!,
     tables: [
       {
         name: 'articles',
         columns: ['title', 'body', 'summary'],
-        idColumn: 'id',  // optional, defaults to 'id'
-        langColumn: 'lang',  // optional, use row language instead of global sourceLang
+        idColumn: 'id', // optional, defaults to 'id'
+        langColumn: 'lang', // optional, use row language instead of global sourceLang
       },
       {
         name: 'products',
         columns: ['name', 'description'],
       },
     ],
-    translationTableSuffix: '_translations',  // optional, defaults to '_translations'
-    concurrency: 10,  // optional, number of concurrent translations
+    translationTableSuffix: '_translations', // optional, defaults to '_translations'
+    concurrency: 10, // optional, number of concurrent translations
   },
 }
 
@@ -263,45 +287,47 @@ const config: Config = {
 
 ### Database Configuration Options (`database`)
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `type` | `string` | Database type: `'sqlite'` or `'postgres'` |
-| `connection` | `string` | Connection string (file path for SQLite, URL for PostgreSQL) |
-| `tables` | `array` | Array of tables to translate (see below) |
-| `translationTableSuffix` | `string` | Suffix for translation tables (default: `'_translations'`) |
-| `concurrency` | `number` | Number of concurrent row translations (default: `10`) |
+| Option                   | Type     | Description                                                                                              |
+| ------------------------ | -------- | -------------------------------------------------------------------------------------------------------- |
+| `type`                   | `string` | Database type: `'sqlite'` or `'postgres'`                                                                |
+| `connection`             | `string` | Connection string (file path for SQLite, URL for PostgreSQL)                                             |
+| `tables`                 | `array`  | Array of tables to translate (see below)                                                                 |
+| `translationTableSuffix` | `string` | Suffix for translation tables (default: `'_translations'`)                                               |
+| `concurrency`            | `number` | Positive integer limiting concurrent row translations; overrides top-level `concurrency` (default: `10`) |
 
 #### Table Configuration
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `name` | `string` | Table name |
-| `schema` | `string` | Schema name (PostgreSQL only, default: `'public'`) |
-| `columns` | `string[]` | Array of column names to translate |
-| `idColumn` | `string` | Primary key column (default: `'id'`) |
-| `langColumn` | `string` | Optional source-language column for row-level language detection |
+| Option       | Type       | Description                                                      |
+| ------------ | ---------- | ---------------------------------------------------------------- |
+| `name`       | `string`   | Table name                                                       |
+| `schema`     | `string`   | Schema name (PostgreSQL only, default: `'public'`)               |
+| `columns`    | `string[]` | Array of column names to translate                               |
+| `idColumn`   | `string`   | Primary key column (default: `'id'`)                             |
+| `langColumn` | `string`   | Optional source-language column for row-level language detection |
 
 ### How It Works
 
-For each source table, Speranto creates a translation table (e.g., `articles_translations`) with the following structure:
+For each source table, Speranto creates a translation table (e.g., `articles_translations`) with
+the following structure:
 
-| Column | Description |
-|--------|-------------|
-| `id` | Auto-incrementing primary key |
-| `source_id` | Reference to the source row |
-| `lang` | Language code for the stored row, including the base/source language |
-| `source_lang` | Source language used to generate this row |
-| `row_source_hash` | Hash of the current source content for fast skip checks |
-| `field_source_hashes` | JSON map of per-field hashes for partial retranslations |
-| `<column>` | Stored content for each specified column |
-| `created_at` | Timestamp of creation |
-| `updated_at` | Timestamp of last update |
+| Column                | Description                                                          |
+| --------------------- | -------------------------------------------------------------------- |
+| `id`                  | Auto-incrementing primary key                                        |
+| `source_id`           | Reference to the source row                                          |
+| `lang`                | Language code for the stored row, including the base/source language |
+| `source_lang`         | Source language used to generate this row                            |
+| `row_source_hash`     | Hash of the current source content for fast skip checks              |
+| `field_source_hashes` | JSON map of per-field hashes for partial retranslations              |
+| `<column>`            | Stored content for each specified column                             |
+| `created_at`          | Timestamp of creation                                                |
+| `updated_at`          | Timestamp of last update                                             |
 
 The translation table is now the canonical read model for all languages. Speranto upserts the
 base/source language row into that table as well as translated rows, so consumers can query a
 single table regardless of language.
 
 Database change detection is hash-based:
+
 - a row-level hash skips unchanged rows quickly
 - per-field hashes allow Speranto to retranslate only changed fields instead of the full row
 
@@ -310,35 +336,30 @@ otherwise it falls back to the global `sourceLang`.
 
 ### Database Test Commands
 
-The SQLite database tests can be run directly:
+The full test script starts PostgreSQL and runs all tests:
 
 ```bash
-bun run test:sqlite
+bun run test
 ```
 
-The PostgreSQL database tests are wrapped in an integrated test runner at
-`tests/postgres-test-runner.ts`. It ensures the Docker container from `tests/docker-compose.yml` is
-up and healthy before running the test file:
+To run the database suites individually:
 
 ```bash
-bun run test:postgres
+LLM_API_KEY=test bun test tests/database/sqlite.test.ts
+bun run docker:up
+LLM_API_KEY=test bun test tests/database/postgres.test.ts
 ```
 
-To run both database suites:
+Stop the PostgreSQL test container afterward with:
 
 ```bash
-bun run test:db
-```
-
-To stop the PostgreSQL test container afterward:
-
-```bash
-bun run test:db:down
+docker compose -p speranto -f tests/docker-compose.yml down
 ```
 
 ## Combining Files and Database
 
-You can translate both files and database content in a single run by including both `files` and `database` in your config:
+You can translate both files and database content in a single run by including both `files` and
+`database` in your config:
 
 ```typescript
 const config: Config = {
@@ -352,7 +373,7 @@ const config: Config = {
   },
   database: {
     type: 'postgres',
-    connection: process.env.DATABASE_URL,
+    connection: process.env.DATABASE_URL!,
     tables: [{ name: 'posts', columns: ['title', 'body'] }],
   },
 }

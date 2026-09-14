@@ -24,7 +24,7 @@ export interface TableConfig {
  */
 export interface DatabaseConfig {
   /** Database type */
-  type: 'sqlite' | 'postgres' | 'mysql'
+  type: 'sqlite' | 'postgres'
   /** Connection string (file path for SQLite, URL for PostgreSQL) */
   connection: string
   /** Tables to translate */

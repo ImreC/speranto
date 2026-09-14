@@ -6,7 +6,8 @@ import type * as t from '@babel/types'
 function resolveDefault<T>(mod: any): T {
   if (typeof mod === 'function') return mod
   if (mod && typeof mod.default === 'function') return mod.default
-  if (mod && mod.default && typeof mod.default.default === 'function') return mod.default.default
+  if (mod && mod.default && typeof mod.default.default === 'function')
+    return mod.default.default
   return mod
 }
 
@@ -232,8 +233,7 @@ export async function reconstructJS(
   ast: t.File,
   translations: Array<{ path: string; value: string }>,
 ): Promise<string> {
-  let stringCounter = 0
-  let templateCounter = 0
+  let nodeCounter = 0
   const translationMap = new Map(translations.map((t) => [t.path, t.value]))
 
   traverse(ast, {
@@ -243,7 +243,7 @@ export async function reconstructJS(
         path.parent.value === path.node &&
         !isVariableReference(path)
       ) {
-        const key = `string_${stringCounter++}`
+        const key = `string_${nodeCounter++}`
         if (translationMap.has(key)) {
           path.node.value = translationMap.get(key)!
         }
@@ -256,7 +256,7 @@ export async function reconstructJS(
       }
 
       if (path.parent.type === 'ObjectProperty' && path.parent.value === path.node) {
-        const key = `template_${templateCounter++}`
+        const key = `template_${nodeCounter++}`
         if (translationMap.has(key)) {
           path.node.quasis[0].value.raw = translationMap.get(key)!
           path.node.quasis[0].value.cooked = translationMap.get(key)!

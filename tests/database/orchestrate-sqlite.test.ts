@@ -63,13 +63,13 @@ test('sqlite db - orchestrate writes base and translated rows to translation tab
       'SELECT source_id, lang, source_lang, title, body, row_source_hash FROM articles_translations ORDER BY source_id, lang',
     )
     .all() as Array<{
-      source_id: string
-      lang: string
-      source_lang: string
-      title: string
-      body: string
-      row_source_hash: string
-    }>
+    source_id: string
+    lang: string
+    source_lang: string
+    title: string
+    body: string
+    row_source_hash: string
+  }>
   readDb.close()
 
   expect(rows).toHaveLength(4)
@@ -99,8 +99,12 @@ test('sqlite db - orchestrate uses langColumn per row and excludes same-language
       body TEXT
     )
   `)
-  db.run(`INSERT INTO articles (lang, title, body) VALUES ('en', 'Hello World', 'This is the body.')`)
-  db.run(`INSERT INTO articles (lang, title, body) VALUES ('nl', 'Hallo Wereld', 'Dit is de inhoud.')`)
+  db.run(
+    `INSERT INTO articles (lang, title, body) VALUES ('en', 'Hello World', 'This is the body.')`,
+  )
+  db.run(
+    `INSERT INTO articles (lang, title, body) VALUES ('nl', 'Hallo Wereld', 'Dit is de inhoud.')`,
+  )
   db.close()
 
   class LanguageAwareMockProvider extends MockLLMProvider {
@@ -168,11 +172,11 @@ test('sqlite db - orchestrate uses langColumn per row and excludes same-language
       'SELECT source_id, lang, source_lang, title FROM articles_translations ORDER BY source_id, lang',
     )
     .all() as Array<{
-      source_id: string
-      lang: string
-      source_lang: string
-      title: string
-    }>
+    source_id: string
+    lang: string
+    source_lang: string
+    title: string
+  }>
   readDb.close()
 
   const row1 = rows.filter((row) => row.source_id === '1')
@@ -236,7 +240,9 @@ test('sqlite db - orchestrate only retranslates changed fields', async () => {
 
   const readDb = new Database(dbPath, { readonly: true })
   const row = readDb
-    .query(`SELECT title, body FROM articles_translations WHERE source_id = '1' AND lang = 'es'`)
+    .query(
+      `SELECT title, body FROM articles_translations WHERE source_id = '1' AND lang = 'es'`,
+    )
     .get() as { title: string; body: string }
   readDb.close()
 
@@ -299,14 +305,14 @@ test('sqlite db - orchestrate skips unchanged rows entirely', async () => {
   const readDb = new Database(dbPath, { readonly: true })
   const rows = readDb
     .query(
-      'SELECT source_id, lang, title, body FROM articles_translations WHERE lang = \'es\' ORDER BY source_id',
+      "SELECT source_id, lang, title, body FROM articles_translations WHERE lang = 'es' ORDER BY source_id",
     )
     .all() as Array<{
-      source_id: string
-      lang: string
-      title: string
-      body: string
-    }>
+    source_id: string
+    lang: string
+    title: string
+    body: string
+  }>
   readDb.close()
 
   expect(rows).toHaveLength(2)
@@ -469,7 +475,9 @@ test('sqlite db - init preserves existing translations and stamps hashes on them
 
   // Clear hashes to simulate pre-hash state
   const clearDb = new Database(dbPath)
-  clearDb.run(`UPDATE articles_translations SET row_source_hash = '', field_source_hashes = '{}'`)
+  clearDb.run(
+    `UPDATE articles_translations SET row_source_hash = '', field_source_hashes = '{}'`,
+  )
   clearDb.close()
 
   // Run init to rebuild hashes
@@ -503,7 +511,12 @@ test('sqlite db - init preserves existing translations and stamps hashes on them
   expect(rows[0]).toMatchObject({ source_id: '1', lang: 'en', title: 'Hello World' })
   expect(rows[0]?.row_source_hash).toBeTruthy()
   // Translated row preserved with hash stamped
-  expect(rows[1]).toMatchObject({ source_id: '1', lang: 'es', title: 'Hola Mundo', body: 'Este es el cuerpo.' })
+  expect(rows[1]).toMatchObject({
+    source_id: '1',
+    lang: 'es',
+    title: 'Hola Mundo',
+    body: 'Este es el cuerpo.',
+  })
   expect(rows[1]?.row_source_hash).toBeTruthy()
 })
 
@@ -608,4 +621,92 @@ test('sqlite db - orchestrate respects retranslate=true even when hashes match',
   await orchestrate({ ...baseConfig, retranslate: true }, '0.1.2')
 
   expect(callCount).toBe(1)
+})
+
+test('sqlite db - translation failures should reject and allow a clean retry', async () => {
+  const db = new Database(dbPath)
+  db.run(`
+    CREATE TABLE articles (
+      id INTEGER PRIMARY KEY,
+      title TEXT,
+      body TEXT
+    )
+  `)
+  db.run(`INSERT INTO articles (title, body) VALUES ('Hello World', 'This is the body.')`)
+  db.close()
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: new MockLLMProvider('test-model', true),
+    database: {
+      type: 'sqlite',
+      connection: dbPath,
+      tables: [{ name: 'articles', columns: ['title', 'body'] }],
+    },
+  }
+
+  await expect(orchestrate(config, '0.1.2')).rejects.toThrow()
+
+  const retryProvider = new MockLLMProvider('test-model')
+  retryProvider.setMockResponse('Hello World', 'Hola Mundo')
+  retryProvider.setMockResponse('This is the body.', 'Este es el cuerpo.')
+  await orchestrate({ ...config, llm: retryProvider }, '0.1.2')
+
+  const readDb = new Database(dbPath, { readonly: true })
+  const rows = readDb
+    .query('SELECT lang, title, body FROM articles_translations ORDER BY lang')
+    .all() as Array<{ lang: string; title: string; body: string }>
+  readDb.close()
+
+  expect(rows).toHaveLength(2)
+  expect(rows.find((row) => row.lang === 'es')).toMatchObject({
+    title: 'Hola Mundo',
+    body: 'Este es el cuerpo.',
+  })
+})
+
+test('sqlite db - database concurrency should override global concurrency', async () => {
+  const db = new Database(dbPath)
+  db.run(`CREATE TABLE articles (id INTEGER PRIMARY KEY, title TEXT)`)
+  db.run(`INSERT INTO articles (title) VALUES ('First'), ('Second'), ('Third')`)
+  db.close()
+
+  class ConcurrentMockProvider extends MockLLMProvider {
+    activeCalls = 0
+    maximumActiveCalls = 0
+
+    override async generate(prompt: string, options?: any) {
+      this.activeCalls++
+      this.maximumActiveCalls = Math.max(this.maximumActiveCalls, this.activeCalls)
+      try {
+        await Bun.sleep(10)
+        return await super.generate(prompt, options)
+      } finally {
+        this.activeCalls--
+      }
+    }
+  }
+
+  const mockProvider = new ConcurrentMockProvider('test-model')
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    concurrency: 1,
+    llm: mockProvider,
+    database: {
+      type: 'sqlite',
+      connection: dbPath,
+      concurrency: 2,
+      tables: [{ name: 'articles', columns: ['title'] }],
+    },
+  }
+
+  await orchestrate(config, '0.1.2')
+
+  expect(mockProvider.maximumActiveCalls).toBe(2)
 })

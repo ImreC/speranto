@@ -25,8 +25,6 @@ export function createDatabaseAdapter(config: DatabaseConfig): DatabaseAdapter {
         )
       }
       return new PostgresAdapter(config.connection)
-    case 'mysql':
-      throw new Error('MySQL adapter not yet implemented')
     default:
       throw new Error(`Unknown database type: ${config.type}`)
   }
