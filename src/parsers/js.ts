@@ -1,7 +1,7 @@
 import { parse } from '@babel/parser'
 import * as _generate from '@babel/generator'
 import * as _traverse from '@babel/traverse'
-import * as t from '@babel/types'
+import type * as t from '@babel/types'
 
 function resolveDefault<T>(mod: any): T {
   if (typeof mod === 'function') return mod

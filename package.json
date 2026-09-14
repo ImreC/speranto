@@ -43,35 +43,27 @@
     "test": "bun run docker:up && LLM_API_KEY=test bun test"
   },
   "devDependencies": {
-    "@types/babel__generator": "^7.27.0",
-    "@types/babel__traverse": "^7.28.0",
-    "@types/bun": "latest",
-    "@types/pg": "^8.11.10",
-    "@types/sql.js": "^1.4.9",
-    "@vitest/ui": "^3.2.4"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+    "@types/bun": "^1.4.2",
+    "@types/mdast": "^4.0.4",
+    "@types/pg": "^8.23.1",
+    "@types/sql.js": "^1.4.11",
+    "tsdown": "^0.23.0",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@babel/generator": "^7.28.0",
-    "@babel/parser": "^7.28.0",
-    "@babel/traverse": "^7.28.0",
-    "@babel/types": "^7.28.2",
-    "@types/glob": "^9.0.0",
-    "@types/mdast": "^4.0.4",
-    "commander": "^14.0.0",
-    "glob": "^11.0.3",
-    "listr2": "^9.0.1",
-    "openai": "^5.11.0",
-    "pg": "^8.13.1",
-    "remark": "^15.0.1",
+    "@babel/generator": "^8.0.5",
+    "@babel/parser": "^8.0.5",
+    "@babel/traverse": "^8.0.5",
+    "@babel/types": "^8.0.5",
+    "commander": "^15.0.0",
+    "glob": "^13.0.6",
+    "listr2": "^11.1.0",
+    "openai": "^7.15.0",
+    "pg": "^8.23.0",
     "remark-frontmatter": "^5.0.0",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
-    "sql.js": "^1.12.0",
-    "tsdown": "^0.17.3",
-    "unified": "^11.0.5",
-    "unist-util-visit": "^5.0.0"
+    "sql.js": "^1.14.2",
+    "unified": "^11.0.5"
   }
 }

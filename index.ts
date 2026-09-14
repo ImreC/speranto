@@ -3,7 +3,7 @@ import { Command } from 'commander'
 import { orchestrate } from './src/orchestrate'
 import type { Config } from './src/types'
 import { loadConfig } from './src/util/config'
-import pkg from './package.json' assert { type: 'json' }
+import pkg from './package.json' with { type: 'json' }
 
 export type { Config, FileConfig, DatabaseConfig, TableConfig } from './src/config'
 
