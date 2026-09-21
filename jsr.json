@@ -7,6 +7,6 @@
     ".": "./src/config.ts"
   },
   "publish": {
-    "include": ["src/config.ts", "README.md", "LICENSE"]
+    "include": ["src/config.ts", "docs/agent-guide.md", "README.md", "LICENSE"]
   }
 }

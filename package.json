@@ -20,7 +20,9 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "docs/agent-guide.md",
+    "scripts/install-agent-docs.mjs"
   ],
   "exports": {
     ".": {
@@ -31,6 +33,7 @@
   "scripts": {
     "types": "tsc src/types.ts --declaration --emitDeclarationOnly --outDir dist",
     "build": "tsdown",
+    "postinstall": "node ./scripts/install-agent-docs.mjs",
     "link": "bun run build && bun link",
     "sync:version": "bun run scripts/version.ts sync",
     "bump:version": "bun run scripts/version.ts",
@@ -48,7 +51,8 @@
     "@types/pg": "^8.23.1",
     "@types/sql.js": "^1.4.11",
     "tsdown": "^0.23.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "unrun": "^0.3.1"
   },
   "dependencies": {
     "@babel/generator": "^8.0.5",

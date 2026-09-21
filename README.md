@@ -30,6 +30,89 @@ deno add jsr:@speranto/speranto
 import type { Config } from '@speranto/speranto'
 ```
 
+### Agent documentation
+
+The npm package installs current Speranto guidance for coding agents into the consuming
+project:
+
+```text
+.agents/
+└── speranto/
+    ├── guide.md
+    └── manifest.json
+```
+
+`docs/agent-guide.md` in the Speranto repository is the canonical source. During installation
+and package upgrades, the `postinstall` hook copies that guide to
+`.agents/speranto/guide.md` when Speranto is a direct dependency. It also adds a small managed
+reference to the project's existing `AGENTS.md`, `CLAUDE.md`, or `.claude/CLAUDE.md` file. When
+none of those files exist, it creates a minimal `AGENTS.md`. Existing content outside the
+following markers is never replaced:
+
+```md
+<!-- speranto-agent-docs:start -->
+## Speranto
+
+When working with localization, Speranto configuration, or translated content, read and follow
+@.agents/speranto/guide.md.
+<!-- speranto-agent-docs:end -->
+```
+
+If `CLAUDE.md` already imports `AGENTS.md` using Claude's `@AGENTS.md` syntax, only `AGENTS.md`
+is updated. Repeated installation is idempotent, and updating the package replaces the managed
+guide with the canonical guide from the installed version.
+
+Current package managers generally block unapproved dependency lifecycle scripts. The install
+still succeeds, but the agent guide is not synchronized until the hook is approved or the setup
+command is run directly.
+
+| Package manager | Default behavior                                | Approve and run the hook                                                                 |
+| --------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| npm             | Reports and skips unapproved install scripts    | `npm install-scripts approve @speranto/speranto`, then `npm rebuild @speranto/speranto`  |
+| pnpm            | Reports dependencies awaiting build approval    | `pnpm approve-builds @speranto/speranto`                                                 |
+| Bun             | Reports scripts blocked by its dependency trust | `bun pm trust @speranto/speranto`                                                        |
+| Yarn 4.14+      | Disables third-party postinstall scripts        | Set `dependenciesMeta["@speranto/speranto"].built` to `true`, then run `yarn install`   |
+
+For Yarn, add the approval to the consuming project's top-level `package.json`:
+
+```json
+{
+  "dependenciesMeta": {
+    "@speranto/speranto": {
+      "built": true
+    }
+  }
+}
+```
+
+npm pins script approval to the currently installed package version by default, so an upgrade
+may require approval again. pnpm, Bun, and Yarn store package-level approval in the consuming
+project. Older package-manager versions or projects with a broader script policy may run the hook
+without an approval step.
+
+Regardless of package-manager policy, install or repair the documentation directly with:
+
+```bash
+speranto setup-agents
+```
+
+This command performs the same synchronization as the postinstall hook and remains available when
+the hook was blocked. In CI, run it explicitly or use `--check` to fail when committed agent
+documentation is stale.
+
+Check whether the installed copy is current, or remove all Speranto-managed references and
+files:
+
+```bash
+speranto setup-agents --check
+speranto setup-agents --remove
+```
+
+Set `SPERANTO_SKIP_AGENT_DOCS=1` to disable automatic installation. The generated
+`.agents/speranto/guide.md` and its manifest may be committed so agents can use them before
+dependencies are installed. Do not edit the generated guide directly; update project-specific
+instructions in `AGENTS.md` or `CLAUDE.md` instead.
+
 ## Development
 
 Install dependencies, type-check, test, and build with Bun:
@@ -43,6 +126,10 @@ bun run build
 
 `bun run test` starts the PostgreSQL 16 test container and runs the complete suite with
 `LLM_API_KEY=test`. For a direct `bun test` command, set that environment variable yourself.
+
+Agent-facing documentation is maintained in `docs/agent-guide.md`. Update it in the same change
+as CLI flags, configuration, generated-file behavior, or recommended translation workflows
+that affect coding agents.
 
 ### Versioning
 

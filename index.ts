@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { Command, InvalidArgumentError } from 'commander'
+import { manageAgentDocs } from './src/agent-docs'
 import { orchestrate } from './src/orchestrate'
 import type { Config } from './src/types'
 import { loadConfig } from './src/util/config'
@@ -21,6 +22,49 @@ program
   .name('speranto')
   .description('A quick and simple machine translation tool for i18n in webapps')
   .version(pkg.version)
+
+program
+  .command('setup-agents')
+  .description('Install or update Speranto documentation for coding agents')
+  .option('--check', 'Check whether the installed agent documentation is current')
+  .option('--remove', 'Remove Speranto-managed agent documentation and references')
+  .option('--root <path>', 'Project root to update', process.cwd())
+  .action(async (options: { check?: boolean; remove?: boolean; root: string }) => {
+    if (options.check && options.remove) {
+      process.stderr.write('Error: --check and --remove cannot be used together.\n')
+      process.exitCode = 1
+      return
+    }
+
+    try {
+      const result = await manageAgentDocs({
+        mode: options.remove ? 'remove' : options.check ? 'check' : 'install',
+        projectRoot: options.root,
+      })
+      for (const warning of result.warnings) {
+        process.stderr.write(`Warning: ${warning}\n`)
+      }
+      if (result.status === 'stale') {
+        process.stderr.write(
+          `Speranto agent documentation is stale: ${result.changedFiles.join(', ')}\n`,
+        )
+        process.exitCode = 1
+        return
+      }
+      if (result.changedFiles.length === 0) {
+        process.stdout.write('Speranto agent documentation is already current.\n')
+        return
+      }
+      process.stdout.write(
+        `Speranto agent documentation ${result.status}: ${result.changedFiles.join(', ')}\n`,
+      )
+    } catch (error) {
+      process.stderr.write(`Error: ${error instanceof Error ? error.message : error}\n`)
+      process.exitCode = 1
+    }
+  })
+
+program
   .option(
     '-c, --config <path>',
     'Path to config file. Looks for speranto.config.ts or speranto.config.js in the current working directory if not specified',
