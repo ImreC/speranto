@@ -61,7 +61,6 @@
     "@babel/types": "^8.0.5",
     "commander": "^15.0.0",
     "glob": "^13.0.6",
-    "listr2": "^11.1.0",
     "openai": "^7.15.0",
     "pg": "^8.23.0",
     "remark-frontmatter": "^5.0.0",

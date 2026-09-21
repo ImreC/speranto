@@ -79,6 +79,48 @@ test('translate should handle multiple target languages', async () => {
   expect(config.targetLangs).toHaveLength(3)
 })
 
+test('translate should share global concurrency across target languages', async () => {
+  class ConcurrentMockProvider extends MockLLMProvider {
+    activeCalls = 0
+    maximumActiveCalls = 0
+
+    override async generate(prompt: string, options?: any) {
+      this.activeCalls++
+      this.maximumActiveCalls = Math.max(this.maximumActiveCalls, this.activeCalls)
+      try {
+        await Bun.sleep(10)
+        return await super.generate(prompt, options)
+      } finally {
+        this.activeCalls--
+      }
+    }
+  }
+
+  const mockProvider = new ConcurrentMockProvider('test-model')
+  await writeFile(
+    join(sourceDir, 'test.json'),
+    JSON.stringify({ page: { title: 'Title' } }),
+  )
+
+  await orchestrate(
+    {
+      model: 'test-model',
+      sourceLang: 'en',
+      targetLangs: ['es', 'fr', 'de'],
+      provider: 'mistral',
+      concurrency: 2,
+      llm: mockProvider,
+      files: {
+        sourceDir,
+        targetDir: join(targetDir, '[lang]'),
+      },
+    },
+    '0.1.2',
+  )
+
+  expect(mockProvider.maximumActiveCalls).toBe(2)
+})
+
 test('translate should use language code as filename when configured', async () => {
   const mockProvider = new MockLLMProvider('test-model')
 

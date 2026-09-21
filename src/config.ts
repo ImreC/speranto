@@ -85,7 +85,7 @@ export interface Config {
   apiKey?: string
   /** Base URL for OpenAI-compatible API (overrides provider default) */
   baseUrl?: string
-  /** Maximum concurrent LLM calls (default 5, use 1 for sequential) */
+  /** Maximum concurrent LLM calls across all languages and sources (default 5, local default 1) */
   concurrency?: number
   /** Request timeout in milliseconds (default: 600000 / 10 minutes) */
   timeout?: number

@@ -668,7 +668,7 @@ test('sqlite db - translation failures should reject and allow a clean retry', a
   })
 })
 
-test('sqlite db - database concurrency should override global concurrency', async () => {
+test('sqlite db - database row concurrency should respect global LLM concurrency', async () => {
   const db = new Database(dbPath)
   db.run(`CREATE TABLE articles (id INTEGER PRIMARY KEY, title TEXT)`)
   db.run(`INSERT INTO articles (title) VALUES ('First'), ('Second'), ('Third')`)
@@ -708,5 +708,5 @@ test('sqlite db - database concurrency should override global concurrency', asyn
 
   await orchestrate(config, '0.1.2')
 
-  expect(mockProvider.maximumActiveCalls).toBe(2)
+  expect(mockProvider.maximumActiveCalls).toBe(1)
 })

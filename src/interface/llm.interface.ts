@@ -1,5 +1,6 @@
 export interface LLMGenerateOptions {
   maxTokens?: number
+  executionLabel?: string
   [key: string]: any
 }
 
