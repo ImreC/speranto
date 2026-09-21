@@ -48,7 +48,8 @@
     "@types/pg": "^8.23.1",
     "@types/sql.js": "^1.4.11",
     "tsdown": "^0.23.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "unrun": "^0.3.1"
   },
   "dependencies": {
     "@babel/generator": "^8.0.5",
@@ -57,7 +58,6 @@
     "@babel/types": "^8.0.5",
     "commander": "^15.0.0",
     "glob": "^13.0.6",
-    "listr2": "^11.1.0",
     "openai": "^7.15.0",
     "pg": "^8.23.0",
     "remark-frontmatter": "^5.0.0",
