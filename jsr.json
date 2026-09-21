@@ -1,12 +1,17 @@
 {
   "name": "@speranto/speranto",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "license": "MIT",
   "description": "A quick and simple machine translation tool for i18n in webapps. Translate JSON, JS/TS, Markdown files and database content using OpenAI, Mistral, or Ollama.",
   "exports": {
     ".": "./src/config.ts"
   },
   "publish": {
-    "include": ["src/config.ts", "docs/agent-guide.md", "README.md", "LICENSE"]
+    "include": [
+      "src/config.ts",
+      "docs/agent-guide.md",
+      "README.md",
+      "LICENSE"
+    ]
   }
 }
