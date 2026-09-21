@@ -136,7 +136,7 @@ export default config
 | `provider`        | `string`   | LLM provider: `'openai'`, `'ollama'`, `'mistral'`, or any OpenAI-compatible |
 | `apiKey`          | `string`   | API key for the LLM provider                                                |
 | `baseUrl`         | `string`   | Base URL for OpenAI-compatible APIs (overrides provider default)            |
-| `concurrency`     | `number`   | Positive integer limiting concurrent LLM calls (default: `5`)               |
+| `concurrency`     | `number`   | Global concurrent LLM call limit across languages and sources (default: `5`, local: `1`) |
 | `timeout`         | `number`   | Request timeout in milliseconds (default: `600000` / 10 minutes)            |
 | `verbose`         | `boolean`  | Print the resolved configuration with secrets redacted                      |
 | `retranslate`     | `boolean`  | Force retranslation of all values, even if already translated               |
@@ -158,7 +158,13 @@ hash-based change detection. That lets it skip unchanged files quickly and only 
 groups/chunks on later runs.
 
 Translation failures are reported as errors and cause a non-zero CLI exit. Speranto validates
-group responses before updating output or sidecar state, so failed groups remain safe to retry.
+group responses before updating output or sidecar state, so a failed file is not partially written.
+Other files that completed successfully are committed before the command exits.
+
+Target languages, files, and database tables are prepared concurrently. All LLM requests pass
+through one global FIFO queue, so increasing parallelism never multiplies `concurrency` by the
+number of languages. Local Ollama and localhost endpoints default to one active request; set
+`concurrency` explicitly when the local server supports continuous batching.
 
 ### Language-Specific Instructions
 
@@ -221,7 +227,7 @@ speranto \
   -k, --api-key <key>              # API key for LLM provider
   -b, --base-url <url>             # Base URL for OpenAI-compatible API
   -i, --instructions-dir <path>    # Directory containing language instruction files
-  -n, --concurrency <number>       # Max concurrent LLM calls (default 5)
+  -n, --concurrency <number>       # Global LLM call limit (default 5, local 1)
   -v, --verbose                    # Enable verbose output for debugging
   -r, --retranslate                # Force retranslation of all values
   --init                           # Build state from existing translations
@@ -293,7 +299,7 @@ const config: Config = {
 | `connection`             | `string` | Connection string (file path for SQLite, URL for PostgreSQL)                                             |
 | `tables`                 | `array`  | Array of tables to translate (see below)                                                                 |
 | `translationTableSuffix` | `string` | Suffix for translation tables (default: `'_translations'`)                                               |
-| `concurrency`            | `number` | Positive integer limiting concurrent row translations; overrides top-level `concurrency` (default: `10`) |
+| `concurrency`            | `number` | Positive integer limiting active database row jobs (default: top-level value or `10`); the global LLM limit still applies |
 
 #### Table Configuration
 

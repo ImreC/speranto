@@ -6,7 +6,7 @@ const config: Config = {
   provider: 'openai', // 'openai', 'mistral', 'ollama', or another OpenAI-compatible provider
   apiKey: process.env.OPENAI_API_KEY,
   // baseUrl: 'https://my-llm.example.com/v1',
-  concurrency: 5,
+  concurrency: 5, // Global LLM request limit across every language and source
   timeout: 600_000,
   verbose: false,
 
@@ -45,7 +45,7 @@ const config: Config = {
   //     },
   //   ],
   //   translationTableSuffix: '_translations',
-  //   concurrency: 10, // Overrides top-level concurrency for database rows
+  //   concurrency: 10, // Active row jobs; top-level concurrency remains the LLM request limit
   // },
 
   retranslate: false,

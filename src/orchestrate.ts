@@ -2,7 +2,6 @@ import { glob } from 'glob'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname, relative, extname } from 'path'
-import { Listr } from 'listr2'
 import { getTranslatableChunks, parseMarkdown, stringifyMarkdown } from './parsers/md'
 import {
   parseJSON,
@@ -31,6 +30,8 @@ import {
   type StoredMarkdownChunkState,
 } from './util/file-state'
 import { resolveConcurrency } from './util/concurrency'
+import { ExecutionEvents, type ProgressReporter } from './execution/events'
+import { RequestScheduler } from './execution/scheduler'
 import { createContentHash, createHashMetadata, type HashEntry } from './util/hash'
 import type { Config, FileConfig } from './types'
 import type { Root, BlockContent } from 'mdast'
@@ -39,20 +40,49 @@ interface FileTranslateConfig extends Config {
   files: FileConfig
 }
 
-export async function orchestrate(config: Config, version: string) {
-  if (config.files) {
-    await translateFiles(config as FileTranslateConfig)
-  }
+export async function orchestrate(
+  config: Config,
+  version: string,
+  reporter?: ProgressReporter,
+) {
+  const defaultConcurrency = isLocalEndpoint(config) ? 1 : 5
+  const concurrency = resolveConcurrency(config.concurrency, defaultConcurrency, 'concurrency')
+  const scheduler = new RequestScheduler(concurrency, new ExecutionEvents(reporter))
+  const operations: Promise<void>[] = []
 
-  if (config.database) {
-    await orchestrateDatabase(config)
+  if (config.files) operations.push(translateFiles(config as FileTranslateConfig, scheduler))
+  if (config.database) operations.push(orchestrateDatabase(config, scheduler))
+
+  const results = await Promise.allSettled(operations)
+  reporter?.finish?.()
+  const errors = results
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map((result) =>
+      result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
+    )
+  if (errors.length > 0) throw new AggregateError(errors, formatAggregateError(errors))
+}
+
+function isLocalEndpoint(config: Config): boolean {
+  if (config.provider === 'ollama') return true
+  if (!config.baseUrl) return false
+
+  try {
+    const hostname = new URL(config.baseUrl).hostname
+    return (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '::1' ||
+      hostname === '[::1]'
+    )
+  } catch {
+    return false
   }
 }
 
-async function translateFiles(config: FileTranslateConfig) {
+async function translateFiles(config: FileTranslateConfig, scheduler: RequestScheduler) {
   const { files } = config
   const extensions = ['md', 'json', 'js', 'ts']
-  const concurrency = resolveConcurrency(config.concurrency, 5, 'concurrency')
 
   const patterns = extensions.map((ext) =>
     files.useLangCodeAsFilename
@@ -68,102 +98,80 @@ async function translateFiles(config: FileTranslateConfig) {
     return
   }
 
-  for (const targetLang of config.targetLangs) {
-    const translator = new Translator({
-      model: config.model,
-      sourceLang: config.sourceLang,
-      targetLang,
-      provider: config.provider,
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      timeout: config.timeout,
-      llm: config.llm,
-      instructionsDir: config.instructionsDir,
-      retranslate: config.retranslate,
-    })
-    const stateStore = new FileStateStore(getFileStateRoot(), targetLang)
-    await stateStore.load()
+  const languageResults = await Promise.allSettled(
+    config.targetLangs.map(async (targetLang) => {
+      const translator = new Translator({
+        model: config.model,
+        sourceLang: config.sourceLang,
+        targetLang,
+        provider: config.provider,
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        timeout: config.timeout,
+        llm: config.llm,
+        instructionsDir: config.instructionsDir,
+        retranslate: config.retranslate,
+        scheduler,
+        job: {
+          id: `files:${targetLang}`,
+          label: `Files → ${targetLang}`,
+          source: 'file',
+          targetLang,
+        },
+      })
+      const stateStore = new FileStateStore(getFileStateRoot(), targetLang)
+      await stateStore.load()
 
-    const fileWorkMap = new Map<string, { filePath: string; items: WorkItem[] }>()
+      const fileWorkMap = new Map<string, { filePath: string; items: WorkItem[] }>()
 
-    for (const filePath of allFiles) {
-      const items = await collectFileWorkItemsForFile(filePath, config, targetLang, stateStore)
-      if (items.length > 0) {
-        const relPath = relative(files.sourceDir, filePath)
-        fileWorkMap.set(relPath, { filePath, items })
+      for (const filePath of allFiles) {
+        const items = await collectFileWorkItemsForFile(filePath, config, targetLang, stateStore)
+        if (items.length > 0) {
+          const relPath = relative(files.sourceDir, filePath)
+          fileWorkMap.set(relPath, { filePath, items })
+        }
       }
-    }
 
-    if (fileWorkMap.size === 0) continue
+      if (fileWorkMap.size === 0) return
 
-    const results: Array<{ filePath: string; write: () => Promise<void> }> = []
-
-    const tasks = Array.from(fileWorkMap.entries()).map(([relPath, { items }]) => ({
-      title: `${relPath} — ${items.length} groups`,
-      task: async (_ctx: unknown, task: any) => {
-        let done = 0
-        await runConcurrent(items, concurrency, async (item) => {
-          const result = await item.execute(translator)
-          results.push(result)
-          done++
-          task.title = `${relPath} — ${done}/${items.length} groups`
-        })
-        task.title = `${relPath} — ${items.length} groups`
-      },
-    }))
-
-    tasks.push({
-      title: 'Writing output',
-      task: async () => {
-        const writesByFile = new Map<string, Array<() => Promise<void>>>()
-        for (const result of results) {
-          if (!writesByFile.has(result.filePath)) {
-            writesByFile.set(result.filePath, [])
+      const fileResults = await Promise.allSettled(
+        Array.from(fileWorkMap.values()).map(async ({ items }) => {
+          const results = await Promise.allSettled(items.map((item) => item.execute(translator)))
+          const errors = settledErrors(results)
+          if (errors.length > 0) {
+            throw new AggregateError(errors, formatAggregateError(errors))
           }
-          writesByFile.get(result.filePath)!.push(result.write)
-        }
-        for (const writers of writesByFile.values()) {
-          for (const write of writers) {
-            await write()
-          }
-        }
-        await stateStore.save()
-      },
-    })
 
-    const listr = new Listr(tasks, {
-      concurrent: false,
-      exitOnError: true,
-      rendererOptions: { collapseSubtasks: true },
-    } as any)
+          const firstResult = results.find(
+            (result): result is PromiseFulfilledResult<{
+              filePath: string
+              write: () => Promise<void>
+            }> => result.status === 'fulfilled',
+          )
+          await firstResult?.value.write()
+        }),
+      )
+      await stateStore.save()
 
-    console.log(`\nFiles → ${targetLang}`)
-    await listr.run()
-  }
+      const errors = settledErrors(fileResults)
+      if (errors.length > 0) throw new AggregateError(errors, formatAggregateError(errors))
+    }),
+  )
+
+  const errors = settledErrors(languageResults)
+  if (errors.length > 0) throw new AggregateError(errors, formatAggregateError(errors))
 }
 
-async function runConcurrent<T>(
-  items: T[],
-  concurrency: number,
-  fn: (item: T) => Promise<void>,
-): Promise<void> {
-  let index = 0
-  const errors: Error[] = []
-  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (index < items.length) {
-      const current = index++
-      try {
-        await fn(items[current]!)
-      } catch (err) {
-        errors.push(err instanceof Error ? err : new Error(String(err)))
-      }
-    }
-  })
-  await Promise.all(workers)
-  if (errors.length > 0) {
-    const msg = `${errors.length} item(s) failed: ${errors.map((e) => e.message).join('; ')}`
-    throw new AggregateError(errors, msg)
-  }
+function settledErrors(results: PromiseSettledResult<unknown>[]): Error[] {
+  return results
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map((result) =>
+      result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
+    )
+}
+
+function formatAggregateError(errors: Error[]): string {
+  return `${errors.length} item(s) failed: ${errors.map((error) => error.message).join('; ')}`
 }
 
 interface WorkItem {
@@ -738,71 +746,60 @@ function getMarkdownChunkStateId(index: number): string {
 }
 
 async function initFiles(config: FileTranslateConfig, allFiles: string[]) {
-  for (const targetLang of config.targetLangs) {
-    const stateStore = new FileStateStore(getFileStateRoot(), targetLang)
-    await stateStore.load()
+  const languageResults = await Promise.allSettled(
+    config.targetLangs.map(async (targetLang) => {
+      const stateStore = new FileStateStore(getFileStateRoot(), targetLang)
+      await stateStore.load()
 
-    const tasks = []
+      const tasks = allFiles.map(async (filePath) => {
+        const relativePath = relative(config.files.sourceDir, filePath)
+        const ext = extname(filePath)
+        const targetPath = getTargetPath(config, filePath, targetLang)
 
-    for (const filePath of allFiles) {
-      const relativePath = relative(config.files.sourceDir, filePath)
-      const ext = extname(filePath)
-      const targetPath = getTargetPath(config, filePath, targetLang)
+        if (!existsSync(targetPath)) return
 
-      if (!existsSync(targetPath)) continue
+        const content = await readFile(filePath, 'utf-8')
+        const sourceFileHash = createContentHash(content)
+        const targetContent = await readFile(targetPath, 'utf-8')
 
-      tasks.push({
-        title: relativePath,
-        task: async () => {
-          const content = await readFile(filePath, 'utf-8')
-          const sourceFileHash = createContentHash(content)
-          const targetContent = await readFile(targetPath, 'utf-8')
-
-          if (ext === '.json') {
-            await initJSONFile(
-              relativePath,
-              content,
-              targetContent,
-              sourceFileHash,
-              config,
-              stateStore,
-            )
-          } else if (ext === '.js' || ext === '.ts') {
-            await initJSFile(
-              relativePath,
-              content,
-              targetContent,
-              sourceFileHash,
-              ext === '.ts',
-              config,
-              stateStore,
-            )
-          } else if (ext === '.md') {
-            await initMarkdownFile(
-              relativePath,
-              content,
-              targetContent,
-              sourceFileHash,
-              config,
-              stateStore,
-            )
-          }
-        },
+        if (ext === '.json') {
+          await initJSONFile(
+            relativePath,
+            content,
+            targetContent,
+            sourceFileHash,
+            config,
+            stateStore,
+          )
+        } else if (ext === '.js' || ext === '.ts') {
+          await initJSFile(
+            relativePath,
+            content,
+            targetContent,
+            sourceFileHash,
+            ext === '.ts',
+            config,
+            stateStore,
+          )
+        } else if (ext === '.md') {
+          await initMarkdownFile(
+            relativePath,
+            content,
+            targetContent,
+            sourceFileHash,
+            config,
+            stateStore,
+          )
+        }
       })
-    }
 
-    if (tasks.length === 0) continue
+      await Promise.all(tasks)
+      await stateStore.save()
+    }),
+  )
 
-    const listr = new Listr(tasks, {
-      concurrent: false,
-      exitOnError: true,
-      rendererOptions: { collapseSubtasks: true },
-    } as any)
-
-    console.log(`\nInit → ${targetLang}`)
-    await listr.run()
-    await stateStore.save()
-  }
+  const errors = settledErrors(languageResults)
+  if (errors.length > 0) throw new AggregateError(errors, formatAggregateError(errors))
 }
 
 async function initJSONFile(

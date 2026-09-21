@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 import { Command, InvalidArgumentError } from 'commander'
 import { orchestrate } from './src/orchestrate'
-import type { Config } from './src/types'
+import { TerminalProgressReporter } from './src/progress/terminal'
 import { loadConfig } from './src/util/config'
 import pkg from './package.json' with { type: 'json' }
+import type { Config } from './src/types'
 
 export type { Config, FileConfig, DatabaseConfig, TableConfig } from './src/config'
 
@@ -39,7 +40,7 @@ program
   .option('-i, --instructions-dir <path>', 'Directory containing language instruction files')
   .option(
     '-n, --concurrency <number>',
-    'Max concurrent LLM calls (default 5)',
+    'Max concurrent LLM calls across all languages and sources (default 5, local default 1)',
     parseConcurrency,
   )
   .option('-v, --verbose', 'Enable verbose output for debugging')
@@ -98,7 +99,7 @@ program
     )
 
     try {
-      await orchestrate(config, pkg.version)
+      await orchestrate(config, pkg.version, new TerminalProgressReporter())
     } catch (error) {
       process.stderr.write(`Error: ${error instanceof Error ? error.message : error}\n`)
       process.exit(1)

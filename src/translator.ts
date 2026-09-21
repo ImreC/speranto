@@ -3,6 +3,9 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { LLMInterface } from './interface'
 import { OpenAICompatibleProvider } from './interface/openai-compatible'
+import { ScheduledLLM } from './interface/scheduled'
+import { RequestScheduler } from './execution/scheduler'
+import type { ExecutionJob } from './execution/events'
 import type { TranslatableChunk } from './parsers/md'
 
 interface TranslatorOptions {
@@ -16,6 +19,8 @@ interface TranslatorOptions {
   llm?: LLMInterface
   instructionsDir?: string
   retranslate?: boolean
+  scheduler?: RequestScheduler
+  job?: ExecutionJob
 }
 
 export class Translator {
@@ -26,19 +31,31 @@ export class Translator {
 
   constructor(options: TranslatorOptions) {
     this.options = options
-    this.llm = options.llm ?? this.createLLMProvider()
+    const llm = options.llm ?? this.createLLMProvider()
+    this.llm =
+      options.scheduler && options.job
+        ? new ScheduledLLM(options.model, llm, options.scheduler, options.job)
+        : llm
     this.ready = Promise.all([this.llm.isModelLoaded(), this.loadLanguageInstructions()]).then(
       () => undefined,
     )
   }
 
   private createLLMProvider(): LLMInterface {
-    return new OpenAICompatibleProvider(this.options.model, {
+    const provider = new OpenAICompatibleProvider(this.options.model, {
       apiKey: this.options.apiKey,
       baseUrl: this.options.baseUrl,
       provider: this.options.provider,
       timeout: this.options.timeout,
+      rateLimitHandler: this.options.scheduler
+        ? {
+            onRateLimit: (delay, attempt) => this.options.scheduler!.pause(delay, attempt),
+            onFatal: (error) => this.options.scheduler!.abort(error),
+          }
+        : undefined,
     })
+
+    return provider
   }
 
   private async loadLanguageInstructions(): Promise<void> {
@@ -79,7 +96,9 @@ export class Translator {
     if (!text.trim()) return text
     await this.ready
 
-    const response = await this.llm.generate(this.constructPrompt(text), {})
+    const response = await this.llm.generate(this.constructPrompt(text), {
+      executionLabel: `Text → ${this.options.targetLang}`,
+    })
     return response.content
   }
 
@@ -89,7 +108,7 @@ export class Translator {
 
     const response = await this.llm.generate(
       this.constructPrompt(chunk.text, chunk.context),
-      {},
+      { executionLabel: `Markdown → ${this.options.targetLang}` },
     )
 
     return response.content
@@ -106,7 +125,9 @@ export class Translator {
 
     const prompt = this.constructGroupPrompt(groupKey, jsonInput)
 
-    const response = await this.llm.generate(prompt, {})
+    const response = await this.llm.generate(prompt, {
+      executionLabel: `${groupKey} → ${this.options.targetLang}`,
+    })
 
     return this.parseGroupResponse(response.content, strings)
   }
@@ -149,7 +170,9 @@ export class Translator {
 
     prompt += `\n\nTranslate the following JSON from ${this.options.sourceLang} to ${this.options.targetLang}:\n\n${JSON.stringify(changedInput, null, 2)}`
 
-    const response = await this.llm.generate(prompt, {})
+    const response = await this.llm.generate(prompt, {
+      executionLabel: `${groupKey} → ${this.options.targetLang}`,
+    })
 
     return this.parseGroupResponse(response.content, changedStrings)
   }
