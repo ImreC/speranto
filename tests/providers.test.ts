@@ -1,4 +1,4 @@
-import { test, expect, beforeAll, afterAll } from 'bun:test'
+import { test, expect, beforeAll, afterAll } from 'vitest'
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'path'
 import { Translator } from '../src/translator'
@@ -60,9 +60,7 @@ test('Translator should handle LLM errors gracefully', async () => {
     llm: mockProvider,
   })
 
-  expect(async () => {
-    await translator.translateText('Hello')
-  }).toThrow('Mock LLM error')
+  await expect(translator.translateText('Hello')).rejects.toThrow('Mock LLM error')
 })
 
 test('Translator should wait for model to be loaded', async () => {

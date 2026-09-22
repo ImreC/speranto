@@ -1,10 +1,9 @@
-import { test, expect, beforeEach, afterEach } from 'bun:test'
+import { test, expect, beforeEach, afterEach } from 'vitest'
 import { orchestrate } from '../src/orchestrate'
 import { mkdir, writeFile, rm, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'path'
 import type { Config } from '../src/types'
-import { mockBunFile } from './mocks/BunFile'
 import { MockLLMProvider } from './mocks/LLMProvider'
 import type { ExecutionEvent } from '../src/execution/events'
 
@@ -15,9 +14,6 @@ const targetDir = join(testDir, 'target')
 beforeEach(async () => {
   await mkdir(sourceDir, { recursive: true })
   await mkdir(targetDir, { recursive: true })
-
-  // @ts-ignore
-  globalThis.Bun.file = mockBunFile
 })
 
 afterEach(async () => {
@@ -89,7 +85,7 @@ test('translate should share global concurrency across target languages', async 
       this.activeCalls++
       this.maximumActiveCalls = Math.max(this.maximumActiveCalls, this.activeCalls)
       try {
-        await Bun.sleep(10)
+        await new Promise((resolve) => setTimeout(resolve, 10))
         return await super.generate(prompt, options)
       } finally {
         this.activeCalls--

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { Command, InvalidArgumentError } from 'commander'
 import { manageAgentDocs } from './src/agent-docs'
 import { orchestrate } from './src/orchestrate'

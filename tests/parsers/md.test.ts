@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { test, expect } from 'vitest'
 import { parseMarkdown, stringifyMarkdown, getTranslatableChunks } from '../../src/parsers/md'
 
 test('parseMarkdown should parse markdown content', async () => {

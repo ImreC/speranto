@@ -1,7 +1,37 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
+import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+const require = createRequire(import.meta.url)
+
+function runCLI(args: string[], cwd?: string): Promise<{
+  exitCode: number | null
+  stdout: string
+  stderr: string
+}> {
+  const childProcess = spawn(
+    process.execPath,
+    [
+      '--import',
+      require.resolve('tsx'),
+      join(import.meta.dirname, '..', 'index.ts'),
+      ...args,
+    ],
+    { cwd, env: { ...process.env, LLM_API_KEY: 'test' } },
+  )
+  let stdout = ''
+  let stderr = ''
+  childProcess.stdout.setEncoding('utf-8').on('data', (chunk) => (stdout += chunk))
+  childProcess.stderr.setEncoding('utf-8').on('data', (chunk) => (stderr += chunk))
+
+  return new Promise((resolve, reject) => {
+    childProcess.on('error', reject)
+    childProcess.on('close', (exitCode) => resolve({ exitCode, stdout, stderr }))
+  })
+}
 
 test('CLI should honor init mode from the configuration file', async () => {
   const testDir = await mkdtemp(join(tmpdir(), 'speranto-cli-'))
@@ -32,18 +62,7 @@ test('CLI should honor init mode from the configuration file', async () => {
       })}`,
     )
 
-    const childProcess = Bun.spawn(
-      [process.execPath, join(import.meta.dir, '..', 'index.ts'), '--config', configPath],
-      {
-        cwd: testDir,
-        env: { ...Bun.env, LLM_API_KEY: 'test' },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      },
-    )
-    const exitCode = await childProcess.exited
-    const stdout = await new Response(childProcess.stdout).text()
-    const stderr = await new Response(childProcess.stderr).text()
+    const { exitCode, stdout, stderr } = await runCLI(['--config', configPath], testDir)
 
     expect(exitCode, stderr).toBe(0)
     expect(stdout).toContain('Resolved configuration')
@@ -58,12 +77,7 @@ test('CLI should honor init mode from the configuration file', async () => {
 })
 
 test('CLI should reject invalid concurrency values', async () => {
-  const childProcess = Bun.spawn(
-    [process.execPath, join(import.meta.dir, '..', 'index.ts'), '--concurrency', '3invalid'],
-    { stdout: 'pipe', stderr: 'pipe' },
-  )
-  const exitCode = await childProcess.exited
-  const stderr = await new Response(childProcess.stderr).text()
+  const { exitCode, stderr } = await runCLI(['--concurrency', '3invalid'])
 
   expect(exitCode).toBe(1)
   expect(stderr).toContain('Concurrency must be a positive integer')

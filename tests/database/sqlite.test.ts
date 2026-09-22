@@ -1,5 +1,5 @@
-import { test, expect, beforeEach, afterEach } from 'bun:test'
-import { Database } from 'bun:sqlite'
+import { test, expect, beforeEach, afterEach } from 'vitest'
+import { Database } from '../mocks/Database'
 import { SQLiteAdapter } from '../../src/database/sqlite'
 import { unlinkSync, existsSync } from 'fs'
 import type { TableConfig } from '../../src/types'
@@ -86,7 +86,7 @@ test('sqlite - ensureTranslationTable creates translation table', async () => {
 
   const db = new Database(TEST_DB)
   const tables = db
-    .query(
+    .prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='articles_translations'",
     )
     .all()

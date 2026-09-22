@@ -1,5 +1,5 @@
-import { afterEach, expect, test } from 'bun:test'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { afterEach, expect, test } from 'vitest'
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { manageAgentDocs } from '../src/agent-docs'
@@ -73,8 +73,8 @@ test('updates existing instruction files without duplicating managed blocks', as
   expect(secondResult.status).toBe('current')
   const agentsContent = await readFile(join(projectRoot, 'AGENTS.md'), 'utf-8')
   const claudeContent = await readFile(join(projectRoot, 'CLAUDE.md'), 'utf-8')
-  expect(agentsContent).toStartWith('# Existing agent instructions')
-  expect(claudeContent).toStartWith('# Existing Claude instructions')
+  expect(agentsContent.startsWith('# Existing agent instructions')).toBe(true)
+  expect(claudeContent.startsWith('# Existing Claude instructions')).toBe(true)
   expect(countManagedBlocks(agentsContent)).toBe(1)
   expect(countManagedBlocks(claudeContent)).toBe(1)
 })
@@ -139,8 +139,8 @@ test('remove deletes managed files and an AGENTS.md created by the installer', a
   const result = await manageAgentDocs({ mode: 'remove', projectRoot })
 
   expect(result.status).toBe('removed')
-  expect(await Bun.file(join(projectRoot, 'AGENTS.md')).exists()).toBe(false)
-  expect(await Bun.file(join(projectRoot, '.agents', 'speranto')).exists()).toBe(false)
+  await expect(access(join(projectRoot, 'AGENTS.md'))).rejects.toThrow()
+  await expect(access(join(projectRoot, '.agents', 'speranto'))).rejects.toThrow()
 })
 
 test('remove preserves user-authored instruction content', async () => {
@@ -185,6 +185,5 @@ test('postinstall skips projects where Speranto is not a direct dependency', asy
   })
 
   expect(result.status).toBe('skipped')
-  const installedGuide = Bun.file(join(projectRoot, '.agents', 'speranto', 'guide.md'))
-  expect(await installedGuide.exists()).toBe(false)
+  await expect(access(join(projectRoot, '.agents', 'speranto', 'guide.md'))).rejects.toThrow()
 })

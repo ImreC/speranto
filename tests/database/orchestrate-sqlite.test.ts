@@ -1,5 +1,5 @@
-import { test, expect, beforeEach, afterEach } from 'bun:test'
-import { Database } from 'bun:sqlite'
+import { test, expect, beforeEach, afterEach } from 'vitest'
+import { Database } from '../mocks/Database'
 import { mkdir, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'path'
@@ -682,7 +682,7 @@ test('sqlite db - database row concurrency should respect global LLM concurrency
       this.activeCalls++
       this.maximumActiveCalls = Math.max(this.maximumActiveCalls, this.activeCalls)
       try {
-        await Bun.sleep(10)
+        await new Promise((resolve) => setTimeout(resolve, 10))
         return await super.generate(prompt, options)
       } finally {
         this.activeCalls--

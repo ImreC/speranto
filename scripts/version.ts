@@ -30,16 +30,16 @@ const RELEASE_TYPES = new Set([
 ])
 
 const HELP = `Usage:
-  bun run bump:version <patch|minor|major|prepatch|preminor|premajor|prerelease>
-  bun run bump:version sync
-  bun run bump:version <version>
+  pnpm bump:version <patch|minor|major|prepatch|preminor|premajor|prerelease>
+  pnpm bump:version sync
+  pnpm bump:version <version>
 
 Examples:
-  bun run bump:version patch
-  bun run bump:version minor
-  bun run bump:version prerelease beta
-  bun run bump:version 1.0.0
-  bun run sync:version
+  pnpm bump:version patch
+  pnpm bump:version minor
+  pnpm bump:version prerelease beta
+  pnpm bump:version 1.0.0
+  pnpm sync:version
 `
 
 async function readManifest(path: string | URL): Promise<Manifest> {

@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
 import { resolveConcurrency } from '../../src/util/concurrency'
 
 test('resolveConcurrency should use the fallback when no value is configured', () => {

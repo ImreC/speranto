@@ -13,6 +13,10 @@
   "types": "dist/index.d.mts",
   "module": "dist/index.mjs",
   "type": "module",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=22.13"
+  },
   "bin": {
     "speranto": "dist/index.mjs"
   },
@@ -34,25 +38,28 @@
     "types": "tsc src/types.ts --declaration --emitDeclarationOnly --outDir dist",
     "build": "tsdown",
     "postinstall": "node ./scripts/install-agent-docs.mjs",
-    "link": "bun run build && bun link",
-    "sync:version": "bun run scripts/version.ts sync",
-    "bump:version": "bun run scripts/version.ts",
-    "bump:patch": "bun run scripts/version.ts patch",
-    "bump:minor": "bun run scripts/version.ts minor",
-    "bump:major": "bun run scripts/version.ts major",
-    "example:seed": "bun run scripts/seed-example-db.ts",
-    "example": "bun run example:seed && cd example_content && bun ../index.ts",
+    "link": "pnpm build && pnpm link --global",
+    "sync:version": "tsx scripts/version.ts sync",
+    "bump:version": "tsx scripts/version.ts",
+    "bump:patch": "tsx scripts/version.ts patch",
+    "bump:minor": "tsx scripts/version.ts minor",
+    "bump:major": "tsx scripts/version.ts major",
+    "example:seed": "tsx scripts/seed-example-db.ts",
+    "example": "pnpm example:seed && cd example_content && tsx ../index.ts",
     "docker:up": "docker compose -p speranto -f tests/docker-compose.yml up -d --wait",
-    "test": "bun run docker:up && LLM_API_KEY=test bun test"
+    "test": "pnpm docker:up && LLM_API_KEY=test vitest run",
+    "test:unit": "LLM_API_KEY=test vitest run --exclude tests/database/postgres.test.ts"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.2",
+    "@types/node": "^22.0.0",
     "@types/mdast": "^4.0.4",
     "@types/pg": "^8.23.1",
     "@types/sql.js": "^1.4.11",
     "tsdown": "^0.23.0",
+    "tsx": "^4.20.6",
     "typescript": "^7.0.2",
-    "unrun": "^0.3.1"
+    "unrun": "^0.3.1",
+    "vitest": "^3.2.4"
   },
   "dependencies": {
     "@babel/generator": "^8.0.5",

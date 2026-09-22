@@ -1,5 +1,5 @@
-import { test, expect, beforeAll, beforeEach, afterAll } from 'bun:test'
-import { SQL } from 'bun'
+import { test, expect, beforeAll, beforeEach, afterAll } from 'vitest'
+import pg from 'pg'
 import { PostgresAdapter } from '../../src/database/postgres'
 import type { TableConfig } from '../../src/types'
 
@@ -11,15 +11,16 @@ const articlesTable: TableConfig = {
 }
 
 let adapter: PostgresAdapter
-let sql: SQL
+let sql: pg.Client
 
 beforeAll(async () => {
-  sql = new SQL(CONNECTION_STRING)
+  sql = new pg.Client({ connectionString: CONNECTION_STRING })
+  await sql.connect()
 
-  await sql.unsafe(`DROP TABLE IF EXISTS articles_translations`)
-  await sql.unsafe(`DROP TABLE IF EXISTS articles`)
+  await sql.query(`DROP TABLE IF EXISTS articles_translations`)
+  await sql.query(`DROP TABLE IF EXISTS articles`)
 
-  await sql.unsafe(`
+  await sql.query(`
     CREATE TABLE articles (
       id SERIAL PRIMARY KEY,
       title TEXT,
@@ -30,13 +31,13 @@ beforeAll(async () => {
 })
 
 beforeEach(async () => {
-  await sql.unsafe(`TRUNCATE TABLE articles RESTART IDENTITY CASCADE`)
-  await sql.unsafe(`DROP TABLE IF EXISTS articles_translations`)
+  await sql.query(`TRUNCATE TABLE articles RESTART IDENTITY CASCADE`)
+  await sql.query(`DROP TABLE IF EXISTS articles_translations`)
 
-  await sql.unsafe(
+  await sql.query(
     `INSERT INTO articles (title, body, slug) VALUES ('Hello World', 'This is the body.', 'hello-world')`,
   )
-  await sql.unsafe(
+  await sql.query(
     `INSERT INTO articles (title, body, slug) VALUES ('Second Post', 'Another body here.', 'second-post')`,
   )
 
@@ -46,9 +47,9 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await adapter?.close()
-  await sql.unsafe(`DROP TABLE IF EXISTS articles_translations`)
-  await sql.unsafe(`DROP TABLE IF EXISTS articles`)
-  await sql.close()
+  await sql.query(`DROP TABLE IF EXISTS articles_translations`)
+  await sql.query(`DROP TABLE IF EXISTS articles`)
+  await sql.end()
 })
 
 test('pg - getSourceRows returns all rows with specified columns', async () => {
@@ -66,8 +67,8 @@ test('pg - getSourceRows returns all rows with specified columns', async () => {
 })
 
 test('pg - getSourceRows includes langColumn when configured', async () => {
-  await sql.unsafe(`ALTER TABLE articles ADD COLUMN lang TEXT DEFAULT 'en'`)
-  await sql.unsafe(`UPDATE articles SET lang = 'nl' WHERE id = 2`)
+  await sql.query(`ALTER TABLE articles ADD COLUMN lang TEXT DEFAULT 'en'`)
+  await sql.query(`UPDATE articles SET lang = 'nl' WHERE id = 2`)
 
   const rows = await adapter.getSourceRows({
     name: 'articles',
@@ -82,12 +83,12 @@ test('pg - getSourceRows includes langColumn when configured', async () => {
 test('pg - ensureTranslationTable creates translation table', async () => {
   await adapter.ensureTranslationTable(articlesTable, '_translations')
 
-  const tables = await sql.unsafe(`
+  const tables = await sql.query(`
     SELECT table_name FROM information_schema.tables
     WHERE table_name = 'articles_translations'
   `)
 
-  expect(tables).toHaveLength(1)
+  expect(tables.rows).toHaveLength(1)
 })
 
 test('pg - upsertTranslation inserts new translation', async () => {

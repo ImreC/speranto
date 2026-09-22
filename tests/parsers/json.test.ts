@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { test, expect } from 'vitest'
 import {
   parseJSON,
   stringifyJSON,
@@ -22,7 +22,7 @@ test('parseJSON should parse valid JSON', async () => {
 test('parseJSON should throw on invalid JSON', async () => {
   const content = '{"greeting": "Hello",}'
 
-  expect(async () => await parseJSON(content)).toThrow()
+  await expect(parseJSON(content)).rejects.toThrow()
 })
 
 test('stringifyJSON should format JSON with 2-space indentation', async () => {

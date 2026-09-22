@@ -3,8 +3,7 @@
 A quick and simple machine translation tool for i18n in web apps. Named after Esperanto, the
 universal European language, Speranto helps you translate content across multiple languages.
 
-The published CLI runs with [Bun](https://bun.sh/), while its runtime code uses Node-compatible
-APIs so the package can be consumed from Node-compatible projects.
+The published CLI runs on Node.js 22.13 or newer.
 
 ## Installation
 
@@ -14,8 +13,6 @@ npm install @speranto/speranto
 yarn add @speranto/speranto
 # or
 pnpm add @speranto/speranto
-# or
-bun add @speranto/speranto
 ```
 
 Configuration types are also available on [JSR](https://jsr.io/@speranto/speranto):
@@ -70,7 +67,6 @@ command is run directly.
 | --------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | npm             | Reports and skips unapproved install scripts    | `npm install-scripts approve @speranto/speranto`, then `npm rebuild @speranto/speranto`  |
 | pnpm            | Reports dependencies awaiting build approval    | `pnpm approve-builds @speranto/speranto`                                                 |
-| Bun             | Reports scripts blocked by its dependency trust | `bun pm trust @speranto/speranto`                                                        |
 | Yarn 4.14+      | Disables third-party postinstall scripts        | Set `dependenciesMeta["@speranto/speranto"].built` to `true`, then run `yarn install`   |
 
 For Yarn, add the approval to the consuming project's top-level `package.json`:
@@ -86,7 +82,7 @@ For Yarn, add the approval to the consuming project's top-level `package.json`:
 ```
 
 npm pins script approval to the currently installed package version by default, so an upgrade
-may require approval again. pnpm, Bun, and Yarn store package-level approval in the consuming
+may require approval again. pnpm and Yarn store package-level approval in the consuming
 project. Older package-manager versions or projects with a broader script policy may run the hook
 without an approval step.
 
@@ -115,17 +111,19 @@ instructions in `AGENTS.md` or `CLAUDE.md` instead.
 
 ## Development
 
-Install dependencies, type-check, test, and build with Bun:
+Install pnpm using the current official Node.js installer, then install dependencies, type-check,
+test, and build:
 
 ```bash
-bun install
-bunx tsc --noEmit
-bun run test
-bun run build
+npx get-pnpm
+pnpm install
+pnpm exec tsc --noEmit
+pnpm test
+pnpm build
 ```
 
-`bun run test` starts the PostgreSQL 16 test container and runs the complete suite with
-`LLM_API_KEY=test`. For a direct `bun test` command, set that environment variable yourself.
+`pnpm test` starts the PostgreSQL 16 test container and runs the complete suite with
+`LLM_API_KEY=test`. Use `pnpm test:unit` to run the suite without PostgreSQL.
 
 Agent-facing documentation is maintained in `docs/agent-guide.md`. Update it in the same change
 as CLI flags, configuration, generated-file behavior, or recommended translation workflows
@@ -138,22 +136,22 @@ Keep `package.json` as the source of truth. The sync step updates shared package
 `exports` and `publish` intact:
 
 ```bash
-bun run bump:version patch
-bun run bump:version minor
-bun run bump:version major
+pnpm bump:version patch
+pnpm bump:version minor
+pnpm bump:version major
 ```
 
 You can also create prereleases or set an explicit version:
 
 ```bash
-bun run bump:version prerelease beta
-bun run bump:version 1.0.0
+pnpm bump:version prerelease beta
+pnpm bump:version 1.0.0
 ```
 
 If `package.json` was edited manually, resync `jsr.json` with:
 
 ```bash
-bun run sync:version
+pnpm sync:version
 ```
 
 ## Usage
@@ -480,15 +478,15 @@ otherwise it falls back to the global `sourceLang`.
 The full test script starts PostgreSQL and runs all tests:
 
 ```bash
-bun run test
+pnpm test
 ```
 
 To run the database suites individually:
 
 ```bash
-LLM_API_KEY=test bun test tests/database/sqlite.test.ts
-bun run docker:up
-LLM_API_KEY=test bun test tests/database/postgres.test.ts
+LLM_API_KEY=test pnpm exec vitest run tests/database/sqlite.test.ts
+pnpm docker:up
+LLM_API_KEY=test pnpm exec vitest run tests/database/postgres.test.ts
 ```
 
 Stop the PostgreSQL test container afterward with:

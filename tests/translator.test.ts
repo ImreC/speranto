@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { test, expect } from 'vitest'
 import { Translator } from '../src/translator'
 import { MockLLMProvider } from './mocks/LLMProvider'
 import type { LLMGenerateOptions, LLMResponse } from '../src/interface'
@@ -47,7 +47,7 @@ test('should reject group responses with missing or non-string values', async ()
     llm: new InvalidGroupProvider('test-model'),
   })
 
-  expect(
+  await expect(
     translator.translateGroup('_root', [{ key: 'title', value: 'Title' }]),
   ).rejects.toThrow('missing a string value for key "title"')
 })

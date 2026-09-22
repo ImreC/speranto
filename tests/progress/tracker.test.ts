@@ -1,5 +1,5 @@
 import type { WriteStream } from 'node:tty'
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
 import {
   ProgressTracker,
   type ProgressRenderer,

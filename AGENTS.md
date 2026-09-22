@@ -17,36 +17,36 @@ Published to npm as `@speranto/speranto` and to JSR as `@speranto/speranto`.
 
 ## Build/Lint/Test Commands
 
-Use Bun instead of Node.js for all tooling:
+Use pnpm and Node.js for all tooling:
 
 ```bash
 # Install dependencies
-bun install
+pnpm install
 
 # Start PostgreSQL and run the complete test suite
-bun run test
+pnpm test
 
 # Stop the PostgreSQL Docker container
 docker compose -p speranto -f tests/docker-compose.yml down
 
 # Run a single test file
-LLM_API_KEY=test bun test tests/translator.test.ts
+LLM_API_KEY=test pnpm exec vitest run tests/translator.test.ts
 
 # Run tests matching a pattern
-LLM_API_KEY=test bun test --filter "parseJSON"
+LLM_API_KEY=test pnpm exec vitest run -t "parseJSON"
 
 # Build the package (uses tsdown)
-bun run build
+pnpm build
 
 # Type check (no emit)
-bunx tsc --noEmit
+pnpm exec tsc --noEmit
 ```
 
-`bun run test` starts the PostgreSQL 16 container and sets `LLM_API_KEY=test`. For direct
-`bun test ...` invocations, set that environment variable manually. PostgreSQL tests also require
-the container, which can be started independently with `bun run docker:up`.
+`pnpm test` starts the PostgreSQL 16 container and sets `LLM_API_KEY=test`. For direct
+`vitest ...` invocations, set that environment variable manually. PostgreSQL tests also require
+the container, which can be started independently with `pnpm docker:up`.
 
-Run `bunx tsc --noEmit` after each code change and check for errors.
+Run `pnpm exec tsc --noEmit` after each code change and check for errors.
 
 ## Code Style
 
@@ -159,7 +159,7 @@ Only add comments when truly necessary to explain non-obvious behavior.
 
 ### Runtime Code (src/)
 
-Use Node.js APIs, NOT Bun-specific APIs:
+Use Node.js APIs, not runtime-specific alternatives:
 
 ```typescript
 // Correct
@@ -167,14 +167,13 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname, relative, extname } from 'node:path'
 
-// Incorrect - do NOT use in runtime code
-Bun.file()
-Bun.write()
+// Incorrect - do NOT use APIs from other JavaScript runtimes
+Deno.readTextFile()
 ```
 
 ### Test/Build Code
 
-Bun-specific APIs are allowed in:
+Test-runner and build-tool APIs are allowed in:
 
 - Test files (`tests/`)
 - Build scripts (`tsdown.config.ts`)
@@ -185,23 +184,23 @@ Bun-specific APIs are allowed in:
 ### Test Structure
 
 - Test files go in `tests/` directory, mirroring `src/` structure
-- Use `bun:test` for test utilities
+- Use Vitest for test utilities
 - Create mocks in `tests/mocks/`
 
 ### Running Tests
 
 ```bash
 # Run all tests
-bun run test
+pnpm test
 
 # Start PostgreSQL without running tests
-bun run docker:up
+pnpm docker:up
 
 # Run the PostgreSQL adapter tests directly after starting the container
-LLM_API_KEY=test bun test tests/database/postgres.test.ts
+LLM_API_KEY=test pnpm exec vitest run tests/database/postgres.test.ts
 ```
 
-`bun run test` runs `bun run docker:up && LLM_API_KEY=test bun test`, which discovers all test
+`pnpm test` runs `pnpm docker:up && LLM_API_KEY=test vitest run`, which discovers all test
 files automatically. PostgreSQL runs from `tests/docker-compose.yml` on port 5432 with user/password
 `test` and database `speranto_test`.
 
