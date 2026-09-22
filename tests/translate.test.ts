@@ -94,10 +94,7 @@ test('translate should share global concurrency across target languages', async 
   }
 
   const mockProvider = new ConcurrentMockProvider('test-model')
-  await writeFile(
-    join(sourceDir, 'test.json'),
-    JSON.stringify({ page: { title: 'Title' } }),
-  )
+  await writeFile(join(sourceDir, 'test.json'), JSON.stringify({ page: { title: 'Title' } }))
 
   await orchestrate(
     {
@@ -145,11 +142,48 @@ test('translate should report complete plans before translation starts', async (
   )
 
   expect(planned).toHaveLength(2)
-  expect(planned.every((event) => event.type === 'scope-planned' && event.scope.jobs === 2)).toBe(
-    true,
-  )
+  expect(
+    planned.every((event) => event.type === 'scope-planned' && event.scope.jobs === 2),
+  ).toBe(true)
   expect(planningCompleted).toBeGreaterThan(-1)
   expect(firstTranslation).toBeGreaterThan(planningCompleted)
+})
+
+test('dry run should report pending file work without translating or writing', async () => {
+  const events: ExecutionEvent[] = []
+  const mockProvider = new MockLLMProvider('test-model', true)
+  await writeFile(
+    join(sourceDir, 'pages.json'),
+    JSON.stringify({ checkout: { title: 'Checkout' }, nav: { home: 'Home' } }),
+  )
+
+  await orchestrate(
+    {
+      model: 'test-model',
+      sourceLang: 'en',
+      targetLangs: ['es'],
+      provider: 'mistral',
+      llm: mockProvider,
+      dryRun: true,
+      files: { sourceDir, targetDir: join(targetDir, '[lang]') },
+    },
+    '0.1.2',
+    { handle: (event) => events.push(event) },
+  )
+
+  const scope = events.find((event) => event.type === 'scope-planned')
+  expect(scope).toMatchObject({
+    type: 'scope-planned',
+    scope: { pending: 2, reused: 0 },
+  })
+  expect(scope?.type === 'scope-planned' && scope.scope.estimatedTokens).toBeGreaterThan(0)
+  expect(events.some((event) => event.type === 'job-started')).toBe(false)
+  expect(events.at(-1)).toMatchObject({
+    type: 'run-completed',
+    summary: { dryRun: true, operationFailures: 0 },
+  })
+  expect(existsSync(join(targetDir, 'es', 'pages.json'))).toBe(false)
+  expect(existsSync(join(process.cwd(), '.speranto'))).toBe(false)
 })
 
 test('translate should use language code as filename when configured', async () => {

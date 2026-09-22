@@ -152,3 +152,56 @@ test('plain progress output includes planning, languages, failures, and final su
   expect(output).toContain('[failed] es  checkout.json › checkout: provider unavailable')
   expect(output).toContain('[done] 0 translated, 1 reused, 1 failed')
 })
+
+test('plain progress output reports dry-run totals without marking work failed', () => {
+  let output = ''
+  const stream = {
+    isTTY: false,
+    write: (chunk: string) => {
+      output += chunk
+      return true
+    },
+  } as unknown as WriteStream
+  const reporter = new TerminalProgressReporter(stream)
+
+  reporter.handle({ type: 'planning-started', sourceLanguages: 1 })
+  reporter.handle({
+    type: 'scope-planned',
+    scope: {
+      id: 'file:es:checkout.json',
+      label: 'checkout.json',
+      source: 'file',
+      targetLang: 'es',
+      jobs: 2,
+      pending: 2,
+      reused: 0,
+      estimatedTokens: 1250,
+    },
+  })
+  reporter.handle({ type: 'planning-completed' })
+  reporter.handle({
+    type: 'run-completed',
+    summary: { durationMs: 10, operationFailures: 0, dryRun: true },
+  })
+
+  expect(output).toContain('~1,250 source tokens')
+  expect(output).toContain('[done] dry run: 2 pending jobs, 0 reused')
+  expect(output).not.toContain('failed')
+})
+
+test('interactive progress dashboard does not repeat the Speranto heading', () => {
+  let output = ''
+  const stream = {
+    isTTY: true,
+    write: (chunk: string) => {
+      output += chunk
+      return true
+    },
+  } as unknown as WriteStream
+  const reporter = new TerminalProgressReporter(stream)
+
+  reporter.handle({ type: 'planning-started', sourceLanguages: 1 })
+
+  expect(output).toContain('Planning translation…')
+  expect(output).not.toContain('Speranto')
+})

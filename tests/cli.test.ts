@@ -67,6 +67,9 @@ test('CLI should honor init mode from the configuration file', async () => {
     expect(exitCode, stderr).toBe(0)
     expect(stdout).toContain('Resolved configuration')
     expect(stdout).toContain('"init": true')
+    expect(stdout.match(/^Speranto v/mg)).toHaveLength(1)
+    expect(stdout).toContain('Provider: ollama · Model: test-model')
+    expect(stdout).not.toContain('Translating from')
     expect(await readFile(targetPath, 'utf-8')).toBe('{"title":"Hola"}')
     expect(await readFile(join(testDir, '.speranto', 'files', 'es.json'), 'utf-8')).toContain(
       'messages.json',

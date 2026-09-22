@@ -1,10 +1,6 @@
 import type { WriteStream } from 'node:tty'
 import type { ExecutionEvent, ProgressReporter } from '../execution/events'
-import {
-  ProgressTracker,
-  type ProgressRenderer,
-  type ProgressSnapshot,
-} from './tracker'
+import { ProgressTracker, type ProgressRenderer, type ProgressSnapshot } from './tracker'
 
 export class TerminalProgressReporter implements ProgressReporter {
   private tracker: ProgressTracker
@@ -57,6 +53,14 @@ class PlainProgressRenderer implements ProgressRenderer {
   render(snapshot: ProgressSnapshot, event: ExecutionEvent): void {
     if (event.type === 'planning-started') {
       this.write(`[plan] Inspecting work for ${event.sourceLanguages} language(s)`)
+    } else if (event.type === 'scope-planned' && snapshot.dryRun) {
+      const tokens = event.scope.estimatedTokens
+        ? `, ~${event.scope.estimatedTokens.toLocaleString('en-US')} source tokens`
+        : ''
+      this.write(
+        `[dry-run] ${event.scope.targetLang} ${event.scope.source} ${event.scope.label}: ` +
+          `${event.scope.pending} pending, ${event.scope.reused} reused${tokens}`,
+      )
     } else if (event.type === 'planning-completed') {
       this.write(`[plan] ${formatPlan(snapshot)}`)
       this.reportCompletedLanguages(snapshot)
@@ -95,10 +99,10 @@ class PlainProgressRenderer implements ProgressRenderer {
 
 function buildDashboard(snapshot: ProgressSnapshot): string[] {
   const elapsed = formatDuration(Date.now() - snapshot.startedAt)
-  const lines = ['Speranto', '']
+  const lines: string[] = []
 
   if (snapshot.phase === 'planning') {
-    lines.push('Planning translation…')
+    lines.push(snapshot.dryRun ? 'Planning dry run…' : 'Planning translation…')
     lines.push(
       `  ${snapshot.files} file target(s) · ${snapshot.tables} table target(s) · ` +
         `${snapshot.planned} jobs discovered`,
@@ -151,6 +155,9 @@ function formatPlan(snapshot: ProgressSnapshot): string {
     `${snapshot.files} file target(s), ${snapshot.tables} table target(s), ` +
     `${snapshot.pending} pending jobs, ${snapshot.reused} reused`
   if (snapshot.rows > 0) summary += `, ${snapshot.rows} database rows`
+  if (snapshot.estimatedTokens > 0) {
+    summary += `, ~${snapshot.estimatedTokens.toLocaleString('en-US')} source tokens`
+  }
   return summary
 }
 
@@ -164,6 +171,13 @@ function formatProgress(snapshot: ProgressSnapshot): string {
 
 function formatSummary(snapshot: ProgressSnapshot): string {
   const duration = snapshot.summary?.durationMs ?? Date.now() - snapshot.startedAt
+  if (snapshot.summary?.dryRun) {
+    return (
+      `dry run: ${snapshot.pending} pending jobs, ${snapshot.reused} reused, ` +
+      `~${snapshot.estimatedTokens.toLocaleString('en-US')} source tokens in ` +
+      formatDuration(duration)
+    )
+  }
   let summary =
     `${snapshot.completed} translated, ${snapshot.reused} reused, ` +
     `${snapshot.failed} failed, ${snapshot.committedFiles} files written in ` +

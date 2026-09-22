@@ -18,6 +18,36 @@ afterEach(async () => {
   await rm(testDir, { recursive: true, force: true })
 })
 
+test('sqlite db - dry run reports work without creating translation tables', async () => {
+  const db = new Database(dbPath)
+  db.run('CREATE TABLE articles (id INTEGER PRIMARY KEY, title TEXT, body TEXT)')
+  db.run(`INSERT INTO articles (title, body) VALUES ('Hello World', 'This is the body.')`)
+  db.close()
+
+  const config: Config = {
+    model: 'test-model',
+    sourceLang: 'en',
+    targetLangs: ['es'],
+    provider: 'mistral',
+    llm: new MockLLMProvider('test-model', true),
+    dryRun: true,
+    database: {
+      type: 'sqlite',
+      connection: dbPath,
+      tables: [{ name: 'articles', columns: ['title', 'body'] }],
+    },
+  }
+
+  await orchestrate(config, '0.1.2')
+
+  const readDb = new Database(dbPath, { readonly: true })
+  const table = readDb
+    .query("SELECT name FROM sqlite_master WHERE name = 'articles_translations'")
+    .get()
+  readDb.close()
+  expect(table).toBeUndefined()
+})
+
 test('sqlite db - orchestrate writes base and translated rows to translation table', async () => {
   const db = new Database(dbPath)
   db.run(`

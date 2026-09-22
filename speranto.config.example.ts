@@ -55,6 +55,7 @@ const config: Config = {
   // },
 
   retranslate: false,
+  dryRun: false,
   init: false,
 }
 
