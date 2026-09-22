@@ -30,7 +30,11 @@ import {
   type StoredMarkdownChunkState,
 } from './util/file-state'
 import { resolveConcurrency } from './util/concurrency'
-import { ExecutionEvents, type ProgressReporter } from './execution/events'
+import {
+  ExecutionEvents,
+  type ExecutionJob,
+  type ProgressReporter,
+} from './execution/events'
 import { RequestScheduler } from './execution/scheduler'
 import { createContentHash, createHashMetadata, type HashEntry } from './util/hash'
 import type { Config, FileConfig } from './types'
@@ -40,27 +44,99 @@ interface FileTranslateConfig extends Config {
   files: FileConfig
 }
 
+interface FileLanguagePlan {
+  targetLang: string
+  stateStore: FileStateStore
+  files: Map<string, { filePath: string; plan: FileWorkPlan }>
+}
+
 export async function orchestrate(
   config: Config,
   version: string,
   reporter?: ProgressReporter,
 ) {
+  const startedAt = Date.now()
   const defaultConcurrency = isLocalEndpoint(config) ? 1 : 5
   const concurrency = resolveConcurrency(config.concurrency, defaultConcurrency, 'concurrency')
-  const scheduler = new RequestScheduler(concurrency, new ExecutionEvents(reporter))
+  const events = new ExecutionEvents(reporter)
+  const scheduler = new RequestScheduler(concurrency, events)
   const operations: Promise<void>[] = []
+  const sourceCount = Number(Boolean(config.files)) + Number(Boolean(config.database))
+  const planningBarrier = new PlanningBarrier(sourceCount, events)
+  events.emit({ type: 'planning-started', sourceLanguages: config.targetLangs.length })
 
-  if (config.files) operations.push(translateFiles(config as FileTranslateConfig, scheduler))
-  if (config.database) operations.push(orchestrateDatabase(config, scheduler))
+  if (config.files) {
+    operations.push(
+      translateFiles(config as FileTranslateConfig, scheduler, events, planningBarrier).catch(
+        (error: unknown) => {
+          planningBarrier.fail(error)
+          throw error
+        },
+      ),
+    )
+  }
+  if (config.database) {
+    operations.push(
+      orchestrateDatabase(config, scheduler, events, planningBarrier).catch((error: unknown) => {
+        planningBarrier.fail(error)
+        throw error
+      }),
+    )
+  }
 
   const results = await Promise.allSettled(operations)
-  reporter?.finish?.()
   const errors = results
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     .map((result) =>
       result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
     )
+  events.emit({
+    type: 'run-completed',
+    summary: { durationMs: Date.now() - startedAt, operationFailures: errors.length },
+  })
+  reporter?.finish?.()
   if (errors.length > 0) throw new AggregateError(errors, formatAggregateError(errors))
+}
+
+export interface PlanningBarrierLike {
+  arrive(): Promise<void>
+  fail(error: unknown): void
+}
+
+class PlanningBarrier implements PlanningBarrierLike {
+  private remaining: number
+  private resolve!: () => void
+  private reject!: (error: unknown) => void
+  private completed: Promise<void>
+  private settled = false
+
+  constructor(sourceCount: number, private events: ExecutionEvents) {
+    this.remaining = sourceCount
+    this.completed = new Promise((resolve, reject) => {
+      this.resolve = resolve
+      this.reject = reject
+    })
+    if (sourceCount === 0) {
+      this.settled = true
+      this.resolve()
+    }
+  }
+
+  async arrive(): Promise<void> {
+    this.remaining--
+    if (this.remaining === 0 && !this.settled) {
+      this.settled = true
+      this.events.emit({ type: 'planning-completed' })
+      this.resolve()
+    }
+    await this.completed
+  }
+
+  fail(error: unknown): void {
+    if (this.settled) return
+    this.settled = true
+    this.reject(error)
+  }
 }
 
 function isLocalEndpoint(config: Config): boolean {
@@ -80,7 +156,12 @@ function isLocalEndpoint(config: Config): boolean {
   }
 }
 
-async function translateFiles(config: FileTranslateConfig, scheduler: RequestScheduler) {
+async function translateFiles(
+  config: FileTranslateConfig,
+  scheduler: RequestScheduler,
+  events: ExecutionEvents,
+  planningBarrier: PlanningBarrierLike,
+) {
   const { files } = config
   const extensions = ['md', 'json', 'js', 'ts']
 
@@ -91,53 +172,102 @@ async function translateFiles(config: FileTranslateConfig, scheduler: RequestSch
   )
   const allFiles = (await Promise.all(patterns.map((pattern) => glob(pattern)))).flat()
 
-  if (allFiles.length === 0) return
+  if (allFiles.length === 0) {
+    await planningBarrier.arrive()
+    return
+  }
 
   if (config.init) {
+    for (const targetLang of config.targetLangs) {
+      for (const filePath of allFiles) {
+        const relativePath = relative(files.sourceDir, filePath)
+        if (!existsSync(getTargetPath(config, filePath, targetLang))) continue
+        events.emit({
+          type: 'scope-planned',
+          scope: {
+            id: `file:${targetLang}:${relativePath}`,
+            label: relativePath,
+            source: 'file',
+            targetLang,
+            jobs: 0,
+            pending: 0,
+            reused: 0,
+          },
+        })
+      }
+    }
+    await planningBarrier.arrive()
     await initFiles(config, allFiles)
     return
   }
 
-  const languageResults = await Promise.allSettled(
-    config.targetLangs.map(async (targetLang) => {
-      const translator = new Translator({
-        model: config.model,
-        sourceLang: config.sourceLang,
-        targetLang,
-        provider: config.provider,
-        baseUrl: config.baseUrl,
-        apiKey: config.apiKey,
-        timeout: config.timeout,
-        ollama: config.ollama,
-        llm: config.llm,
-        instructionsDir: config.instructionsDir,
-        retranslate: config.retranslate,
-        scheduler,
-        job: {
-          id: `files:${targetLang}`,
-          label: `Files → ${targetLang}`,
-          source: 'file',
-          targetLang,
-        },
-      })
+  const plans = await Promise.all(
+    config.targetLangs.map(async (targetLang): Promise<FileLanguagePlan> => {
       const stateStore = new FileStateStore(getFileStateRoot(), targetLang)
       await stateStore.load()
 
-      const fileWorkMap = new Map<string, { filePath: string; items: WorkItem[] }>()
+      const fileWorkMap = new Map<string, { filePath: string; plan: FileWorkPlan }>()
 
       for (const filePath of allFiles) {
-        const items = await collectFileWorkItemsForFile(filePath, config, targetLang, stateStore)
-        if (items.length > 0) {
-          const relPath = relative(files.sourceDir, filePath)
-          fileWorkMap.set(relPath, { filePath, items })
-        }
+        const plan = await collectFileWorkItemsForFile(filePath, config, targetLang, stateStore)
+        const relPath = relative(files.sourceDir, filePath)
+        fileWorkMap.set(relPath, { filePath, plan })
+        events.emit({
+          type: 'scope-planned',
+          scope: {
+            id: `file:${targetLang}:${relPath}`,
+            label: relPath,
+            source: 'file',
+            targetLang,
+            jobs: plan.totalJobs,
+            pending: plan.items.filter((item) => item.translates).length,
+            reused: plan.reusedJobs,
+            writesFile: plan.items.length > 0,
+          },
+        })
       }
 
-      if (fileWorkMap.size === 0) return
+      return { targetLang, stateStore, files: fileWorkMap }
+    }),
+  )
 
+  await planningBarrier.arrive()
+
+  const languageResults = await Promise.allSettled(
+    plans.map(async ({ targetLang, stateStore, files: fileWorkMap }) => {
+      const needsTranslator = Array.from(fileWorkMap.values()).some(({ plan }) =>
+        plan.items.some((item) => item.translates),
+      )
+      const translator = needsTranslator
+        ? new Translator({
+            model: config.model,
+            sourceLang: config.sourceLang,
+            targetLang,
+            provider: config.provider,
+            baseUrl: config.baseUrl,
+            apiKey: config.apiKey,
+            timeout: config.timeout,
+            ollama: config.ollama,
+            llm: config.llm,
+            instructionsDir: config.instructionsDir,
+            retranslate: config.retranslate,
+            scheduler,
+            job: {
+              id: `files:${targetLang}`,
+              label: `Files → ${targetLang}`,
+              source: 'file',
+              targetLang,
+              kind: 'setup',
+            },
+          })
+        : undefined
       const fileResults = await Promise.allSettled(
-        Array.from(fileWorkMap.values()).map(async ({ items }) => {
-          const results = await Promise.allSettled(items.map((item) => item.execute(translator)))
+        Array.from(fileWorkMap.entries()).map(async ([relativePath, { plan }]) => {
+          const { items } = plan
+          if (items.length === 0) return
+          const results = await Promise.allSettled(
+            items.map((item) => executeFileWorkItem(item, translator, events)),
+          )
           const errors = settledErrors(results)
           if (errors.length > 0) {
             throw new AggregateError(errors, formatAggregateError(errors))
@@ -150,6 +280,7 @@ async function translateFiles(config: FileTranslateConfig, scheduler: RequestSch
             }> => result.status === 'fulfilled',
           )
           await firstResult?.value.write()
+          events.emit({ type: 'file-committed', targetLang, file: relativePath })
         }),
       )
       await stateStore.save()
@@ -175,11 +306,43 @@ function formatAggregateError(errors: Error[]): string {
   return `${errors.length} item(s) failed: ${errors.map((error) => error.message).join('; ')}`
 }
 
+async function executeFileWorkItem(
+  item: WorkItem,
+  translator: Translator | undefined,
+  events: ExecutionEvents,
+): Promise<{ filePath: string; write: () => Promise<void> }> {
+  const startedAt = Date.now()
+  if (item.job) events.emit({ type: 'job-started', job: item.job })
+  try {
+    const result = await item.execute(translator)
+    if (item.job) {
+      events.emit({
+        type: 'job-completed',
+        job: item.job,
+        durationMs: Date.now() - startedAt,
+      })
+    }
+    return result
+  } catch (error) {
+    const normalizedError = error instanceof Error ? error : new Error(String(error))
+    if (item.job) events.emit({ type: 'job-failed', job: item.job, error: normalizedError })
+    throw normalizedError
+  }
+}
+
 interface WorkItem {
   label: string
+  translates: boolean
+  job?: ExecutionJob
   execute: (
-    translator: Translator,
+    translator?: Translator,
   ) => Promise<{ filePath: string; write: () => Promise<void> }>
+}
+
+interface FileWorkPlan {
+  items: WorkItem[]
+  totalJobs: number
+  reusedJobs: number
 }
 
 async function collectFileWorkItemsForFile(
@@ -187,7 +350,7 @@ async function collectFileWorkItemsForFile(
   config: FileTranslateConfig,
   targetLang: string,
   stateStore: FileStateStore,
-): Promise<WorkItem[]> {
+): Promise<FileWorkPlan> {
   const ext = extname(filePath)
 
   if (ext === '.md') {
@@ -198,7 +361,7 @@ async function collectFileWorkItemsForFile(
     return collectJSWorkItems(filePath, config, targetLang, ext === '.ts', stateStore)
   }
 
-  return []
+  return { items: [], totalJobs: 0, reusedJobs: 0 }
 }
 
 function getFileStateRoot(): string {
@@ -236,7 +399,7 @@ async function collectMarkdownWorkItems(
   config: FileTranslateConfig,
   targetLang: string,
   stateStore: FileStateStore,
-): Promise<WorkItem[]> {
+): Promise<FileWorkPlan> {
   const relativePath = relative(config.files.sourceDir, filePath)
   const content = await readFile(filePath, 'utf-8')
   const targetPath = getTargetPath(config, filePath, targetLang)
@@ -244,13 +407,14 @@ async function collectMarkdownWorkItems(
   const existingState = !config.retranslate ? stateStore.get(relativePath) : undefined
 
   if (existingState?.fileHash === sourceFileHash && existsSync(targetPath)) {
-    return []
+    const totalJobs = Object.keys(existingState.chunks ?? {}).length
+    return { items: [], totalJobs, reusedJobs: totalJobs }
   }
 
   const tree = await parseMarkdown(content)
   const chunks = await getTranslatableChunks(tree)
 
-  if (chunks.length === 0) return []
+  if (chunks.length === 0) return { items: [], totalJobs: 0, reusedJobs: 0 }
 
   const translatedChunks = new Map<string, string>()
   const nextChunkStates: Record<string, StoredMarkdownChunkState> = {}
@@ -272,8 +436,26 @@ async function collectMarkdownWorkItems(
 
     workItems.push({
       label: `${relativePath} chunk ${index + 1}/${chunks.length}`,
-      execute: async (translator: Translator) => {
-        const translatedText = await translator.translateChunk(chunk)
+      translates: true,
+      job: {
+        id: `file:${targetLang}:${relativePath}:chunk:${index}`,
+        label: `${relativePath} › chunk ${index + 1}/${chunks.length}`,
+        source: 'file',
+        targetLang,
+        kind: 'translation',
+        file: relativePath,
+        group: `chunk ${index + 1}`,
+      },
+      execute: async (translator?: Translator) => {
+        const translatedText = await translator!.translateChunk(chunk, {
+          id: `file:${targetLang}:${relativePath}:chunk:${index}`,
+          label: `${relativePath} › chunk ${index + 1}/${chunks.length}`,
+          source: 'file',
+          targetLang,
+          kind: 'translation',
+          file: relativePath,
+          group: `chunk ${index + 1}`,
+        })
         translatedChunks.set(chunkId, translatedText)
         nextChunkStates[chunkId] = {
           rowHash: hashMetadata.rowHash,
@@ -322,9 +504,13 @@ async function collectMarkdownWorkItems(
 
   if (workItems.length === 0) {
     if (!existsSync(targetPath)) {
-      return [
+      return {
+        totalJobs: chunks.length,
+        reusedJobs: chunks.length,
+        items: [
         {
           label: `${relativePath} restore`,
+          translates: false,
           execute: async () => ({
             filePath,
             write: async () => {
@@ -361,13 +547,18 @@ async function collectMarkdownWorkItems(
             },
           }),
         },
-      ]
+        ],
+      }
     }
 
-    return []
+    return { items: [], totalJobs: chunks.length, reusedJobs: chunks.length }
   }
 
-  return workItems
+  return {
+    items: workItems,
+    totalJobs: chunks.length,
+    reusedJobs: chunks.length - workItems.length,
+  }
 }
 
 async function collectJSONWorkItems(
@@ -375,7 +566,7 @@ async function collectJSONWorkItems(
   config: FileTranslateConfig,
   targetLang: string,
   stateStore: FileStateStore,
-): Promise<WorkItem[]> {
+): Promise<FileWorkPlan> {
   const relativePath = relative(config.files.sourceDir, filePath)
   const content = await readFile(filePath, 'utf-8')
   const targetPath = getTargetPath(config, filePath, targetLang)
@@ -383,7 +574,8 @@ async function collectJSONWorkItems(
   const existingState = !config.retranslate ? stateStore.get(relativePath) : undefined
 
   if (existingState?.fileHash === sourceFileHash && existsSync(targetPath)) {
-    return []
+    const totalJobs = Object.keys(existingState.groups ?? {}).length
+    return { items: [], totalJobs, reusedJobs: totalJobs }
   }
 
   const jsonData = await parseJSON(content)
@@ -454,11 +646,30 @@ async function collectJSONWorkItems(
 
     workItems.push({
       label: `${relativePath} "${group.groupKey}"`,
-      execute: async (translator: Translator) => {
-        const translatedChanged = await translator.translateGroupWithContext(
+      translates: true,
+      job: {
+        id: `file:${targetLang}:${relativePath}:${groupId}`,
+        label: `${relativePath} › ${group.groupKey}`,
+        source: 'file',
+        targetLang,
+        kind: 'translation',
+        file: relativePath,
+        group: group.groupKey,
+      },
+      execute: async (translator?: Translator) => {
+        const translatedChanged = await translator!.translateGroupWithContext(
           group.groupKey,
           preparedGroup.changed,
           preparedGroup.context,
+          {
+            id: `file:${targetLang}:${relativePath}:${groupId}`,
+            label: `${relativePath} › ${group.groupKey}`,
+            source: 'file',
+            targetLang,
+            kind: 'translation',
+            file: relativePath,
+            group: group.groupKey,
+          },
         )
 
         const translatedMap = new Map(translatedChanged.map((s) => [s.key, s.value]))
@@ -502,9 +713,13 @@ async function collectJSONWorkItems(
 
   if (workItems.length === 0 && allTranslatedStrings.length > 0) {
     if (!existsSync(targetPath)) {
-      return [
+      return {
+        totalJobs: allGroups.length,
+        reusedJobs: allGroups.length,
+        items: [
         {
           label: `${relativePath} restore`,
+          translates: false,
           execute: async () => ({
             filePath,
             write: async () => {
@@ -522,13 +737,18 @@ async function collectJSONWorkItems(
             },
           }),
         },
-      ]
+        ],
+      }
     }
 
-    return []
+    return { items: [], totalJobs: allGroups.length, reusedJobs: allGroups.length }
   }
 
-  return workItems
+  return {
+    items: workItems,
+    totalJobs: allGroups.length,
+    reusedJobs: allGroups.length - workItems.length,
+  }
 }
 
 async function collectJSWorkItems(
@@ -537,7 +757,7 @@ async function collectJSWorkItems(
   targetLang: string,
   isTypeScript: boolean,
   stateStore: FileStateStore,
-): Promise<WorkItem[]> {
+): Promise<FileWorkPlan> {
   const relativePath = relative(config.files.sourceDir, filePath)
   const content = await readFile(filePath, 'utf-8')
   const targetPath = getTargetPath(config, filePath, targetLang)
@@ -545,7 +765,8 @@ async function collectJSWorkItems(
   const existingState = !config.retranslate ? stateStore.get(relativePath) : undefined
 
   if (existingState?.fileHash === sourceFileHash && existsSync(targetPath)) {
-    return []
+    const totalJobs = Object.keys(existingState.groups ?? {}).length
+    return { items: [], totalJobs, reusedJobs: totalJobs }
   }
 
   const ast = await parseJS(content, isTypeScript)
@@ -631,11 +852,30 @@ async function collectJSWorkItems(
 
     workItems.push({
       label: `${relativePath} "${group.groupKey}"`,
-      execute: async (translator: Translator) => {
-        const translatedChanged = await translator.translateGroupWithContext(
+      translates: true,
+      job: {
+        id: `file:${targetLang}:${relativePath}:${groupId}`,
+        label: `${relativePath} › ${group.groupKey}`,
+        source: 'file',
+        targetLang,
+        kind: 'translation',
+        file: relativePath,
+        group: group.groupKey,
+      },
+      execute: async (translator?: Translator) => {
+        const translatedChanged = await translator!.translateGroupWithContext(
           group.groupKey,
           preparedGroup.changed,
           preparedGroup.context,
+          {
+            id: `file:${targetLang}:${relativePath}:${groupId}`,
+            label: `${relativePath} › ${group.groupKey}`,
+            source: 'file',
+            targetLang,
+            kind: 'translation',
+            file: relativePath,
+            group: group.groupKey,
+          },
         )
 
         const translatedMap = new Map(translatedChanged.map((s) => [s.key, s.value]))
@@ -681,9 +921,13 @@ async function collectJSWorkItems(
 
   if (workItems.length === 0 && allTranslatedStrings.length > 0) {
     if (!existsSync(targetPath)) {
-      return [
+      return {
+        totalJobs: allGroups.length,
+        reusedJobs: allGroups.length,
+        items: [
         {
           label: `${relativePath} restore`,
+          translates: false,
           execute: async () => ({
             filePath,
             write: async () => {
@@ -707,13 +951,18 @@ async function collectJSWorkItems(
             },
           }),
         },
-      ]
+        ],
+      }
     }
 
-    return []
+    return { items: [], totalJobs: allGroups.length, reusedJobs: allGroups.length }
   }
 
-  return workItems
+  return {
+    items: workItems,
+    totalJobs: allGroups.length,
+    reusedJobs: allGroups.length - workItems.length,
+  }
 }
 
 function createUniqueJSTranslationKeys(

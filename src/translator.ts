@@ -114,13 +114,13 @@ export class Translator {
     return response.content
   }
 
-  async translateChunk(chunk: TranslatableChunk): Promise<string> {
+  async translateChunk(chunk: TranslatableChunk, executionJob?: ExecutionJob): Promise<string> {
     if (!chunk.text.trim()) return chunk.text
     await this.ready
 
     const response = await this.llm.generate(
       this.constructPrompt(chunk.text, chunk.context),
-      { executionLabel: `Markdown → ${this.options.targetLang}` },
+      { executionLabel: `Markdown → ${this.options.targetLang}`, executionJob },
     )
 
     return response.content
@@ -129,6 +129,7 @@ export class Translator {
   async translateGroup(
     groupKey: string,
     strings: Array<{ key: string; value: string }>,
+    executionJob?: ExecutionJob,
   ): Promise<Array<{ key: string; value: string }>> {
     if (strings.length === 0) return strings
     await this.ready
@@ -139,6 +140,7 @@ export class Translator {
 
     const response = await this.llm.generate(prompt, {
       executionLabel: `${groupKey} → ${this.options.targetLang}`,
+      executionJob,
       output: 'json',
     })
 
@@ -149,6 +151,7 @@ export class Translator {
     groupKey: string,
     changedStrings: Array<{ key: string; value: string }>,
     contextStrings: Array<{ key: string; value: string }>,
+    executionJob?: ExecutionJob,
   ): Promise<Array<{ key: string; value: string }>> {
     if (changedStrings.length === 0) return changedStrings
     await this.ready
@@ -185,6 +188,7 @@ export class Translator {
 
     const response = await this.llm.generate(prompt, {
       executionLabel: `${groupKey} → ${this.options.targetLang}`,
+      executionJob,
       output: 'json',
     })
 

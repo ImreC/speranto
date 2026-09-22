@@ -254,6 +254,12 @@ through one global FIFO queue, so increasing parallelism never multiplies `concu
 number of languages. Local Ollama and localhost endpoints default to one active request; set
 `concurrency` explicitly when the local server supports continuous batching.
 
+Before translation starts, Speranto reports the complete plan: file and table targets, pending
+semantic translation jobs, cached work, and database rows. Interactive terminals show overall and
+per-language progress plus the currently active file groups or database rows. Redirected and CI
+output uses stable planning, periodic progress, language completion, rate-limit, and final summary
+lines instead of terminal redraws.
+
 #### Ollama
 
 Ollama runs translations locally without an API key. Install and start Ollama, then configure an

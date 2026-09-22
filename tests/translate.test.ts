@@ -6,6 +6,7 @@ import { join } from 'path'
 import type { Config } from '../src/types'
 import { mockBunFile } from './mocks/BunFile'
 import { MockLLMProvider } from './mocks/LLMProvider'
+import type { ExecutionEvent } from '../src/execution/events'
 
 const testDir = join(process.cwd(), 'test-fixtures')
 const sourceDir = join(testDir, 'source')
@@ -119,6 +120,40 @@ test('translate should share global concurrency across target languages', async 
   )
 
   expect(mockProvider.maximumActiveCalls).toBe(2)
+})
+
+test('translate should report complete plans before translation starts', async () => {
+  const events: ExecutionEvent[] = []
+  await writeFile(
+    join(sourceDir, 'pages.json'),
+    JSON.stringify({ checkout: { title: 'Checkout' }, nav: { home: 'Home' } }),
+  )
+
+  await orchestrate(
+    {
+      model: 'test-model',
+      sourceLang: 'en',
+      targetLangs: ['es', 'fr'],
+      provider: 'mistral',
+      llm: new MockLLMProvider('test-model'),
+      files: { sourceDir, targetDir: join(targetDir, '[lang]') },
+    },
+    '0.1.2',
+    { handle: (event) => events.push(event) },
+  )
+
+  const planned = events.filter((event) => event.type === 'scope-planned')
+  const planningCompleted = events.findIndex((event) => event.type === 'planning-completed')
+  const firstTranslation = events.findIndex(
+    (event) => event.type === 'job-started' && event.job.kind === 'translation',
+  )
+
+  expect(planned).toHaveLength(2)
+  expect(planned.every((event) => event.type === 'scope-planned' && event.scope.jobs === 2)).toBe(
+    true,
+  )
+  expect(planningCompleted).toBeGreaterThan(-1)
+  expect(firstTranslation).toBeGreaterThan(planningCompleted)
 })
 
 test('translate should use language code as filename when configured', async () => {

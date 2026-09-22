@@ -8,8 +8,10 @@ import {
 import { Translator } from './translator'
 import { resolveConcurrency } from './util/concurrency'
 import { RequestScheduler } from './execution/scheduler'
+import { ExecutionEvents } from './execution/events'
 import { createHashMetadata, type HashEntry } from './util/hash'
 import type { Config, TableConfig } from './types'
+import type { PlanningBarrierLike } from './orchestrate'
 
 interface DatabaseTranslateConfig extends Config {
   database: NonNullable<Config['database']>
@@ -20,6 +22,12 @@ interface RowContext {
   sourceLang: string
   hashMetadata: { rowHash: string; fieldHashes: Record<string, string> }
   rowTranslations: Map<string, StoredTranslationRow>
+}
+
+interface DatabaseTablePlan {
+  table: TableConfig
+  sourceRows: SourceRow[]
+  existingTranslations: StoredTranslationRow[]
 }
 
 function prepareRow(
@@ -34,9 +42,57 @@ function prepareRow(
   return { row, sourceLang, hashMetadata, rowTranslations }
 }
 
+function emitDatabasePlan(
+  plan: DatabaseTablePlan,
+  config: DatabaseTranslateConfig,
+  events: ExecutionEvents,
+): void {
+  const translationsBySourceId = buildTranslationIndex(plan.existingTranslations)
+  const tableName = plan.table.schema
+    ? `${plan.table.schema}.${plan.table.name}`
+    : plan.table.name
+
+  for (const targetLang of config.targetLangs) {
+    let jobs = 0
+    let pending = 0
+    for (const row of plan.sourceRows) {
+      const ctx = prepareRow(row, config.sourceLang, translationsBySourceId)
+      if (targetLang === ctx.sourceLang) continue
+      jobs++
+      if (config.init) continue
+      const existing = ctx.rowTranslations.get(targetLang)
+      if (!config.retranslate && existing?.rowSourceHash === ctx.hashMetadata.rowHash) continue
+      const columns = buildTranslatedColumns(
+        ctx.row.columns,
+        ctx.sourceLang,
+        ctx.hashMetadata.fieldHashes,
+        existing,
+        config.retranslate ?? false,
+      )
+      if (columns.changed.length > 0) pending++
+    }
+
+    events.emit({
+      type: 'scope-planned',
+      scope: {
+        id: `database:${targetLang}:${tableName}`,
+        label: tableName,
+        source: 'database',
+        targetLang,
+        jobs,
+        pending,
+        reused: jobs - pending,
+        rows: targetLang === config.targetLangs[0] ? plan.sourceRows.length : 0,
+      },
+    })
+  }
+}
+
 export async function orchestrateDatabase(
   config: Config,
   scheduler: RequestScheduler,
+  events: ExecutionEvents,
+  planningBarrier: PlanningBarrierLike,
 ): Promise<void> {
   if (!config.database) return
 
@@ -57,24 +113,44 @@ export async function orchestrateDatabase(
       await adapter.ensureTranslationTable(table, suffix)
     }
 
+    const plans = await Promise.all(
+      dbConfig.database.tables.map(async (table): Promise<DatabaseTablePlan> => ({
+        table,
+        sourceRows: await adapter.getSourceRows(table),
+        existingTranslations: await adapter.getTranslations(table, suffix),
+      })),
+    )
+
+    for (const plan of plans) emitDatabasePlan(plan, dbConfig, events)
+    await planningBarrier.arrive()
+
     const processTable = config.init
-      ? (table: TableConfig) =>
-          initTable(adapter, table, dbConfig.targetLangs, suffix, config.sourceLang)
-      : (table: TableConfig) =>
+      ? (plan: DatabaseTablePlan) =>
+          initTable(
+            adapter,
+            plan.table,
+            dbConfig.targetLangs,
+            suffix,
+            config.sourceLang,
+            plan.sourceRows,
+            plan.existingTranslations,
+          )
+      : (plan: DatabaseTablePlan) =>
           translateTable(
             adapter,
-            table,
+            plan.table,
             dbConfig.targetLangs,
             suffix,
             concurrency,
             dbConfig,
             translators,
             scheduler,
+            events,
+            plan.sourceRows,
+            plan.existingTranslations,
           )
 
-    const results = await Promise.allSettled(
-      dbConfig.database.tables.map((table) => processTable(table)),
-    )
+    const results = await Promise.allSettled(plans.map((plan) => processTable(plan)))
     const errors = results
       .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       .map((result) =>
@@ -97,10 +173,9 @@ async function initTable(
   targetLangs: string[],
   suffix: string,
   defaultSourceLang: string,
+  sourceRows: SourceRow[],
+  existingTranslations: StoredTranslationRow[],
 ): Promise<void> {
-  const sourceRows = await adapter.getSourceRows(table)
-  const existingTranslations = await adapter.getTranslations(table, suffix)
-
   if (sourceRows.length === 0) {
     return
   }
@@ -142,10 +217,10 @@ async function translateTable(
   config: DatabaseTranslateConfig,
   translators: Map<string, Translator>,
   scheduler: RequestScheduler,
+  events: ExecutionEvents,
+  sourceRows: SourceRow[],
+  existingTranslations: StoredTranslationRow[],
 ): Promise<void> {
-  const sourceRows = await adapter.getSourceRows(table)
-  const existingTranslations = await adapter.getTranslations(table, suffix)
-
   if (sourceRows.length === 0) {
     return
   }
@@ -166,9 +241,11 @@ async function translateTable(
           const translatedRow = await buildTranslatedRow(
             ctx,
             targetLang,
+            table,
             config,
             translators,
             scheduler,
+            events,
           )
           if (translatedRow) {
             await adapter.upsertTranslation(table, translatedRow, suffix)
@@ -241,9 +318,11 @@ function buildBaseLanguageRow(ctx: RowContext, forceWrite: boolean): Translation
 async function buildTranslatedRow(
   ctx: RowContext,
   targetLang: string,
+  table: TableConfig,
   config: DatabaseTranslateConfig,
   translators: Map<string, Translator>,
   scheduler: RequestScheduler,
+  events: ExecutionEvents,
 ): Promise<TranslationRow | null> {
   const existing = ctx.rowTranslations.get(targetLang)
   if (!config.retranslate && existing?.rowSourceHash === ctx.hashMetadata.rowHash) {
@@ -259,6 +338,15 @@ async function buildTranslatedRow(
   )
 
   if (translatedColumns.changed.length > 0) {
+    const job = {
+      id: `database:${targetLang}:${table.name}:${ctx.row.id}`,
+      label: `${table.schema ? `${table.schema}.` : ''}${table.name} › row ${ctx.row.id}`,
+      source: 'database' as const,
+      targetLang,
+      kind: 'translation' as const,
+      table: table.schema ? `${table.schema}.${table.name}` : table.name,
+      rowId: String(ctx.row.id),
+    }
     const translator = getTranslator(
       translators,
       config,
@@ -266,11 +354,22 @@ async function buildTranslatedRow(
       targetLang,
       scheduler,
     )
-    const translated = await translator.translateGroupWithContext(
-      `row_${ctx.row.id}`,
-      translatedColumns.changed,
-      translatedColumns.context,
-    )
+    const startedAt = Date.now()
+    events.emit({ type: 'job-started', job })
+    let translated: Array<{ key: string; value: string }>
+    try {
+      translated = await translator.translateGroupWithContext(
+        `row_${ctx.row.id}`,
+        translatedColumns.changed,
+        translatedColumns.context,
+        job,
+      )
+      events.emit({ type: 'job-completed', job, durationMs: Date.now() - startedAt })
+    } catch (error) {
+      const normalizedError = error instanceof Error ? error : new Error(String(error))
+      events.emit({ type: 'job-failed', job, error: normalizedError })
+      throw normalizedError
+    }
 
     for (const { key, value } of translated) {
       translatedColumns.columns[key] = value
@@ -362,6 +461,7 @@ function getTranslator(
       label: `Database ${sourceLang} → ${targetLang}`,
       source: 'database',
       targetLang,
+      kind: 'setup',
     },
   })
 

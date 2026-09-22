@@ -20,7 +20,10 @@ export class RequestScheduler {
   ) {}
 
   run<T>(job: ExecutionJob, operation: () => Promise<T>): Promise<T> {
-    if (this.abortedError) return Promise.reject(this.abortedError)
+    if (this.abortedError) {
+      this.events.emit({ type: 'job-failed', job, error: this.abortedError })
+      return Promise.reject(this.abortedError)
+    }
 
     return new Promise<T>((resolve, reject) => {
       this.queue.push({
@@ -38,7 +41,10 @@ export class RequestScheduler {
 
     this.abortedError = error
     if (this.cooldownTimer) clearTimeout(this.cooldownTimer)
-    for (const request of this.queue.splice(0)) request.reject(error)
+    for (const request of this.queue.splice(0)) {
+      this.events.emit({ type: 'job-failed', job: request.job, error })
+      request.reject(error)
+    }
   }
 
   pause(delayMs: number, attempt: number): void {

@@ -13,14 +13,17 @@ export class ScheduledLLM extends LLMInterface {
   }
 
   generate(prompt: string, options?: LLMGenerateOptions): Promise<LLMResponse> {
-    const job = options?.executionLabel
+    const job = options?.executionJob ?? (options?.executionLabel
       ? {
           ...this.job,
           id: `${this.job.id}:${options.executionLabel}`,
           label: options.executionLabel,
+          kind: 'translation' as const,
         }
-      : this.job
-    return this.scheduler.run(job, () => this.inner.generate(prompt, options))
+      : this.job)
+    return this.scheduler.run({ ...job, kind: 'request' }, () =>
+      this.inner.generate(prompt, options),
+    )
   }
 
   isModelLoaded(): Promise<boolean> {

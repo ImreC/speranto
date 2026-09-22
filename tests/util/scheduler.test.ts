@@ -27,6 +27,7 @@ test('request scheduler enforces one global concurrency limit', async () => {
         label: `Job ${index}`,
         source: 'file',
         targetLang: index % 2 === 0 ? 'es' : 'fr',
+        kind: 'translation',
       },
       async () => {
         active++
@@ -55,7 +56,7 @@ test('progress reporter failures do not fail scheduled work', async () => {
 
   await expect(
     scheduler.run(
-      { id: 'job', label: 'Job', source: 'file', targetLang: 'es' },
+      { id: 'job', label: 'Job', source: 'file', targetLang: 'es', kind: 'translation' },
       async () => 'completed',
     ),
   ).resolves.toBe('completed')
@@ -65,11 +66,23 @@ test('aborting the scheduler rejects work that has not started', async () => {
   const scheduler = new RequestScheduler(1, new ExecutionEvents())
   let releaseFirst!: () => void
   const first = scheduler.run(
-    { id: 'first', label: 'First', source: 'file', targetLang: 'es' },
+    {
+      id: 'first',
+      label: 'First',
+      source: 'file',
+      targetLang: 'es',
+      kind: 'translation',
+    },
     () => new Promise<void>((resolve) => (releaseFirst = resolve)),
   )
   const second = scheduler.run(
-    { id: 'second', label: 'Second', source: 'file', targetLang: 'fr' },
+    {
+      id: 'second',
+      label: 'Second',
+      source: 'file',
+      targetLang: 'fr',
+      kind: 'translation',
+    },
     async () => undefined,
   )
   const secondResult = second.catch((error: unknown) => error)

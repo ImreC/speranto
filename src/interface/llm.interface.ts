@@ -1,6 +1,9 @@
+import type { ExecutionJob } from '../execution/events'
+
 export interface LLMGenerateOptions {
   maxTokens?: number
   executionLabel?: string
+  executionJob?: ExecutionJob
   output?: 'text' | 'json'
 }
 
