@@ -20,6 +20,7 @@ export interface PlannedScope {
   jobs: number
   pending: number
   reused: number
+  estimatedTokens?: number
   rows?: number
   writesFile?: boolean
 }
@@ -27,10 +28,11 @@ export interface PlannedScope {
 export interface RunSummary {
   durationMs: number
   operationFailures: number
+  dryRun?: boolean
 }
 
 export type ExecutionEvent =
-  | { type: 'planning-started'; sourceLanguages: number }
+  | { type: 'planning-started'; sourceLanguages: number; dryRun?: boolean }
   | { type: 'scope-planned'; scope: PlannedScope }
   | { type: 'planning-completed' }
   | { type: 'job-started'; job: ExecutionJob }

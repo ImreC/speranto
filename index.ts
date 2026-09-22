@@ -96,6 +96,10 @@ program
   .option('-v, --verbose', 'Enable verbose output for debugging')
   .option('-r, --retranslate', 'Force retranslation of all values, even if already translated')
   .option('--init', 'Build state from existing translations without translating')
+  .option(
+    '--dry-run',
+    'Report pending translation work without translating or writing changes',
+  )
   .action(async (options) => {
     const passedConfig = await loadConfig(options.config)
     const provider = options.provider || passedConfig.provider || 'mistral'
@@ -119,6 +123,7 @@ program
       database: passedConfig.database,
       retranslate: options.retranslate || passedConfig.retranslate || false,
       init: options.init || passedConfig.init || false,
+      dryRun: options.dryRun || passedConfig.dryRun || false,
     }
 
     if (!config.files && !config.database) {
@@ -145,13 +150,14 @@ program
           : undefined,
         retranslate: config.retranslate,
         init: config.init,
+        dryRun: config.dryRun,
       }
       console.log(`Resolved configuration:\n${JSON.stringify(verboseConfig, null, 2)}`)
     }
 
     console.log(`Speranto v${pkg.version}`)
     console.log(
-      `Translating from ${config.sourceLang} to ${config.targetLangs.join(', ')} using ${config.model}`,
+      `${config.dryRun ? 'Planning translations' : 'Translating'} from ${config.sourceLang} to ${config.targetLangs.join(', ')} using ${config.model}`,
     )
 
     try {

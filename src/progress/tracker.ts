@@ -19,6 +19,7 @@ export interface ProgressSnapshot {
   phase: 'planning' | 'translating' | 'complete'
   startedAt: number
   sourceLanguages: number
+  dryRun: boolean
   scopes: number
   files: number
   pendingFiles: number
@@ -27,6 +28,7 @@ export interface ProgressSnapshot {
   planned: number
   pending: number
   reused: number
+  estimatedTokens: number
   fileReused: number
   databaseReused: number
   completed: number
@@ -49,6 +51,7 @@ export class ProgressTracker implements ProgressReporter {
     phase: 'planning',
     startedAt: Date.now(),
     sourceLanguages: 0,
+    dryRun: false,
     scopes: 0,
     files: 0,
     pendingFiles: 0,
@@ -57,6 +60,7 @@ export class ProgressTracker implements ProgressReporter {
     planned: 0,
     pending: 0,
     reused: 0,
+    estimatedTokens: 0,
     fileReused: 0,
     databaseReused: 0,
     completed: 0,
@@ -72,12 +76,14 @@ export class ProgressTracker implements ProgressReporter {
   handle(event: ExecutionEvent): void {
     if (event.type === 'planning-started') {
       this.snapshot.sourceLanguages = event.sourceLanguages
+      this.snapshot.dryRun = event.dryRun ?? false
     } else if (event.type === 'scope-planned') {
       const { scope } = event
       this.snapshot.scopes++
       this.snapshot.planned += scope.jobs
       this.snapshot.pending += scope.pending
       this.snapshot.reused += scope.reused
+      this.snapshot.estimatedTokens += scope.estimatedTokens ?? 0
       if (scope.source === 'file') this.snapshot.fileReused += scope.reused
       else this.snapshot.databaseReused += scope.reused
       this.snapshot.rows += scope.rows ?? 0
@@ -105,11 +111,13 @@ export class ProgressTracker implements ProgressReporter {
     } else if (event.type === 'scheduler-paused') {
       this.snapshot.retries++
     } else if (event.type === 'run-completed') {
-      for (const language of Object.values(this.snapshot.languages)) {
-        const unfinished = language.pending - language.completed - language.failed
-        if (unfinished > 0) {
-          language.failed += unfinished
-          this.snapshot.failed += unfinished
+      if (!event.summary.dryRun) {
+        for (const language of Object.values(this.snapshot.languages)) {
+          const unfinished = language.pending - language.completed - language.failed
+          if (unfinished > 0) {
+            language.failed += unfinished
+            this.snapshot.failed += unfinished
+          }
         }
       }
       this.snapshot.phase = 'complete'

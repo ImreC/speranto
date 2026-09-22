@@ -115,4 +115,6 @@ export interface Config {
   retranslate?: boolean
   /** Build state from existing translations without translating */
   init?: boolean
+  /** Report pending translation work without calling the LLM or writing changes */
+  dryRun?: boolean
 }

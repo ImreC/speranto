@@ -55,6 +55,7 @@ function emitDatabasePlan(
   for (const targetLang of config.targetLangs) {
     let jobs = 0
     let pending = 0
+    let estimatedTokens = 0
     for (const row of plan.sourceRows) {
       const ctx = prepareRow(row, config.sourceLang, translationsBySourceId)
       if (targetLang === ctx.sourceLang) continue
@@ -69,7 +70,12 @@ function emitDatabasePlan(
         existing,
         config.retranslate ?? false,
       )
-      if (columns.changed.length > 0) pending++
+      if (columns.changed.length > 0) {
+        pending++
+        estimatedTokens += Math.ceil(
+          columns.changed.reduce((total, column) => total + column.value.length, 0) / 4,
+        )
+      }
     }
 
     events.emit({
@@ -82,6 +88,7 @@ function emitDatabasePlan(
         jobs,
         pending,
         reused: jobs - pending,
+        estimatedTokens,
         rows: targetLang === config.targetLangs[0] ? plan.sourceRows.length : 0,
       },
     })
@@ -109,20 +116,26 @@ export async function orchestrateDatabase(
 
   await adapter.connect()
   try {
-    for (const table of dbConfig.database.tables) {
-      await adapter.ensureTranslationTable(table, suffix)
+    if (!config.dryRun) {
+      for (const table of dbConfig.database.tables) {
+        await adapter.ensureTranslationTable(table, suffix)
+      }
     }
 
     const plans = await Promise.all(
-      dbConfig.database.tables.map(async (table): Promise<DatabaseTablePlan> => ({
-        table,
-        sourceRows: await adapter.getSourceRows(table),
-        existingTranslations: await adapter.getTranslations(table, suffix),
-      })),
+      dbConfig.database.tables.map(
+        async (table): Promise<DatabaseTablePlan> => ({
+          table,
+          sourceRows: await adapter.getSourceRows(table),
+          existingTranslations: await adapter.getTranslations(table, suffix),
+        }),
+      ),
     )
 
     for (const plan of plans) emitDatabasePlan(plan, dbConfig, events)
     await planningBarrier.arrive()
+
+    if (config.dryRun) return
 
     const processTable = config.init
       ? (plan: DatabaseTablePlan) =>

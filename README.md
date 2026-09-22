@@ -48,10 +48,12 @@ following markers is never replaced:
 
 ```md
 <!-- speranto-agent-docs:start -->
+
 ## Speranto
 
 When working with localization, Speranto configuration, or translated content, read and follow
 @.agents/speranto/guide.md.
+
 <!-- speranto-agent-docs:end -->
 ```
 
@@ -63,11 +65,11 @@ Current package managers generally block unapproved dependency lifecycle scripts
 still succeeds, but the agent guide is not synchronized until the hook is approved or the setup
 command is run directly.
 
-| Package manager | Default behavior                                | Approve and run the hook                                                                 |
-| --------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| npm             | Reports and skips unapproved install scripts    | `npm install-scripts approve @speranto/speranto`, then `npm rebuild @speranto/speranto`  |
-| pnpm            | Reports dependencies awaiting build approval    | `pnpm approve-builds @speranto/speranto`                                                 |
-| Yarn 4.14+      | Disables third-party postinstall scripts        | Set `dependenciesMeta["@speranto/speranto"].built` to `true`, then run `yarn install`   |
+| Package manager | Default behavior                             | Approve and run the hook                                                                |
+| --------------- | -------------------------------------------- | --------------------------------------------------------------------------------------- |
+| npm             | Reports and skips unapproved install scripts | `npm install-scripts approve @speranto/speranto`, then `npm rebuild @speranto/speranto` |
+| pnpm            | Reports dependencies awaiting build approval | `pnpm approve-builds @speranto/speranto`                                                |
+| Yarn 4.14+      | Disables third-party postinstall scripts     | Set `dependenciesMeta["@speranto/speranto"].built` to `true`, then run `yarn install`   |
 
 For Yarn, add the approval to the consuming project's top-level `package.json`:
 
@@ -213,21 +215,22 @@ export default config
 
 #### Configuration Options
 
-| Option            | Type       | Description                                                                     |
-| ----------------- | ---------- | ------------------------------------------------------------------------------- |
-| `model`           | `string`   | The AI model to use for translation                                             |
-| `sourceLang`      | `string`   | Source language code (e.g., `'en'` for English)                                 |
-| `targetLangs`     | `string[]` | Array of target language codes                                                  |
-| `provider`        | `string`   | LLM provider: `'openai'`, `'ollama'`, `'mistral'`, or any OpenAI-compatible     |
-| `apiKey`          | `string`   | API key for the LLM provider                                                    |
-| `baseUrl`         | `string`   | Provider base URL (overrides the provider default)                              |
-| `ollama`          | `object`   | Ollama model lifecycle and inference settings (see below)                       |
-| `concurrency`     | `number`   | Global LLM call limit across languages and sources (default: `5`, local: `1`)   |
-| `timeout`         | `number`   | Request timeout in milliseconds (default: `600000` / 10 minutes)                |
-| `verbose`         | `boolean`  | Print the resolved configuration with secrets redacted                          |
-| `retranslate`     | `boolean`  | Force retranslation of all values, even if already translated                   |
-| `init`            | `boolean`  | Build state from existing translations without translating                      |
-| `instructionsDir` | `string`   | Directory containing language-specific instruction files (see below)            |
+| Option            | Type       | Description                                                                   |
+| ----------------- | ---------- | ----------------------------------------------------------------------------- |
+| `model`           | `string`   | The AI model to use for translation                                           |
+| `sourceLang`      | `string`   | Source language code (e.g., `'en'` for English)                               |
+| `targetLangs`     | `string[]` | Array of target language codes                                                |
+| `provider`        | `string`   | LLM provider: `'openai'`, `'ollama'`, `'mistral'`, or any OpenAI-compatible   |
+| `apiKey`          | `string`   | API key for the LLM provider                                                  |
+| `baseUrl`         | `string`   | Provider base URL (overrides the provider default)                            |
+| `ollama`          | `object`   | Ollama model lifecycle and inference settings (see below)                     |
+| `concurrency`     | `number`   | Global LLM call limit across languages and sources (default: `5`, local: `1`) |
+| `timeout`         | `number`   | Request timeout in milliseconds (default: `600000` / 10 minutes)              |
+| `verbose`         | `boolean`  | Print the resolved configuration with secrets redacted                        |
+| `retranslate`     | `boolean`  | Force retranslation of all values, even if already translated                 |
+| `init`            | `boolean`  | Build state from existing translations without translating                    |
+| `dryRun`          | `boolean`  | Report pending work and approximate source tokens without making changes      |
+| `instructionsDir` | `string`   | Directory containing language-specific instruction files (see below)          |
 
 #### File Translation Options (`files`)
 
@@ -291,9 +294,9 @@ groups use Ollama's native JSON output mode.
 | Ollama option   | Type               | Description                                               |
 | --------------- | ------------------ | --------------------------------------------------------- |
 | `autoPull`      | `boolean`          | Download a missing model automatically (default: `false`) |
-| `keepAlive`     | `string \| number` | How long Ollama keeps the model loaded                     |
-| `contextLength` | `number`           | Context window passed as Ollama's `num_ctx`                |
-| `temperature`   | `number`           | Sampling temperature passed to Ollama                      |
+| `keepAlive`     | `string \| number` | How long Ollama keeps the model loaded                    |
+| `contextLength` | `number`           | Context window passed as Ollama's `num_ctx`               |
+| `temperature`   | `number`           | Sampling temperature passed to Ollama                     |
 
 Use `baseUrl` for a remote server or a Docker hostname, for example
 `http://ollama:11434`. Set `apiKey` only when an authenticated proxy or hosted Ollama endpoint
@@ -350,6 +353,9 @@ speranto --retranslate
 # Build state from existing translations without translating
 speranto --init
 
+# Preview pending work and approximate source-token usage
+speranto --dry-run
+
 # All available options
 speranto \
   -c, --config <path>              # Path to config file (auto-detects .ts or .js when omitted)
@@ -364,6 +370,7 @@ speranto \
   -v, --verbose                    # Enable verbose output for debugging
   -r, --retranslate                # Force retranslation of all values
   --init                           # Build state from existing translations
+  --dry-run                        # Report pending work without translating or writing
 ```
 
 ## Database Translation
@@ -426,12 +433,12 @@ const config: Config = {
 
 ### Database Configuration Options (`database`)
 
-| Option                   | Type     | Description                                                                                              |
-| ------------------------ | -------- | -------------------------------------------------------------------------------------------------------- |
-| `type`                   | `string` | Database type: `'sqlite'` or `'postgres'`                                                                |
-| `connection`             | `string` | Connection string (file path for SQLite, URL for PostgreSQL)                                             |
-| `tables`                 | `array`  | Array of tables to translate (see below)                                                                 |
-| `translationTableSuffix` | `string` | Suffix for translation tables (default: `'_translations'`)                                               |
+| Option                   | Type     | Description                                                                                                               |
+| ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `type`                   | `string` | Database type: `'sqlite'` or `'postgres'`                                                                                 |
+| `connection`             | `string` | Connection string (file path for SQLite, URL for PostgreSQL)                                                              |
+| `tables`                 | `array`  | Array of tables to translate (see below)                                                                                  |
+| `translationTableSuffix` | `string` | Suffix for translation tables (default: `'_translations'`)                                                                |
 | `concurrency`            | `number` | Positive integer limiting active database row jobs (default: top-level value or `10`); the global LLM limit still applies |
 
 #### Table Configuration

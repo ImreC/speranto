@@ -36,7 +36,6 @@ export class SQLiteAdapter extends DatabaseAdapter {
 
   async close(): Promise<void> {
     if (this.db) {
-      this.save()
       this.db.close()
       this.db = null
     }
@@ -139,11 +138,14 @@ export class SQLiteAdapter extends DatabaseAdapter {
           sourceLang: String(row.source_lang ?? ''),
           rowSourceHash: String(row.row_source_hash ?? ''),
           fieldSourceHashes: parseFieldHashes(row.field_source_hashes),
-          columns: table.columns.reduce((acc, col) => {
-            const value = row[col]
-            acc[col] = value != null ? String(value) : ''
-            return acc
-          }, {} as Record<string, string>),
+          columns: table.columns.reduce(
+            (acc, col) => {
+              const value = row[col]
+              acc[col] = value != null ? String(value) : ''
+              return acc
+            },
+            {} as Record<string, string>,
+          ),
         })
       }
       stmt.free()
@@ -254,7 +256,9 @@ export class SQLiteAdapter extends DatabaseAdapter {
     const columns = this.getExistingColumns(translationTable)
 
     if (!columns.has('source_lang')) {
-      this.db.run(`ALTER TABLE ${translationTable} ADD COLUMN source_lang TEXT NOT NULL DEFAULT ''`)
+      this.db.run(
+        `ALTER TABLE ${translationTable} ADD COLUMN source_lang TEXT NOT NULL DEFAULT ''`,
+      )
     }
     if (!columns.has('row_source_hash')) {
       this.db.run(

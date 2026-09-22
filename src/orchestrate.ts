@@ -30,11 +30,7 @@ import {
   type StoredMarkdownChunkState,
 } from './util/file-state'
 import { resolveConcurrency } from './util/concurrency'
-import {
-  ExecutionEvents,
-  type ExecutionJob,
-  type ProgressReporter,
-} from './execution/events'
+import { ExecutionEvents, type ExecutionJob, type ProgressReporter } from './execution/events'
 import { RequestScheduler } from './execution/scheduler'
 import { createContentHash, createHashMetadata, type HashEntry } from './util/hash'
 import type { Config, FileConfig } from './types'
@@ -55,6 +51,10 @@ export async function orchestrate(
   version: string,
   reporter?: ProgressReporter,
 ) {
+  if (config.init && config.dryRun) {
+    throw new Error('init and dryRun cannot be enabled together')
+  }
+
   const startedAt = Date.now()
   const defaultConcurrency = isLocalEndpoint(config) ? 1 : 5
   const concurrency = resolveConcurrency(config.concurrency, defaultConcurrency, 'concurrency')
@@ -63,7 +63,11 @@ export async function orchestrate(
   const operations: Promise<void>[] = []
   const sourceCount = Number(Boolean(config.files)) + Number(Boolean(config.database))
   const planningBarrier = new PlanningBarrier(sourceCount, events)
-  events.emit({ type: 'planning-started', sourceLanguages: config.targetLangs.length })
+  events.emit({
+    type: 'planning-started',
+    sourceLanguages: config.targetLangs.length,
+    dryRun: config.dryRun,
+  })
 
   if (config.files) {
     operations.push(
@@ -77,10 +81,12 @@ export async function orchestrate(
   }
   if (config.database) {
     operations.push(
-      orchestrateDatabase(config, scheduler, events, planningBarrier).catch((error: unknown) => {
-        planningBarrier.fail(error)
-        throw error
-      }),
+      orchestrateDatabase(config, scheduler, events, planningBarrier).catch(
+        (error: unknown) => {
+          planningBarrier.fail(error)
+          throw error
+        },
+      ),
     )
   }
 
@@ -92,7 +98,11 @@ export async function orchestrate(
     )
   events.emit({
     type: 'run-completed',
-    summary: { durationMs: Date.now() - startedAt, operationFailures: errors.length },
+    summary: {
+      durationMs: Date.now() - startedAt,
+      operationFailures: errors.length,
+      dryRun: config.dryRun,
+    },
   })
   reporter?.finish?.()
   if (errors.length > 0) throw new AggregateError(errors, formatAggregateError(errors))
@@ -110,7 +120,10 @@ class PlanningBarrier implements PlanningBarrierLike {
   private completed: Promise<void>
   private settled = false
 
-  constructor(sourceCount: number, private events: ExecutionEvents) {
+  constructor(
+    sourceCount: number,
+    private events: ExecutionEvents,
+  ) {
     this.remaining = sourceCount
     this.completed = new Promise((resolve, reject) => {
       this.resolve = resolve
@@ -209,7 +222,12 @@ async function translateFiles(
       const fileWorkMap = new Map<string, { filePath: string; plan: FileWorkPlan }>()
 
       for (const filePath of allFiles) {
-        const plan = await collectFileWorkItemsForFile(filePath, config, targetLang, stateStore)
+        const plan = await collectFileWorkItemsForFile(
+          filePath,
+          config,
+          targetLang,
+          stateStore,
+        )
         const relPath = relative(files.sourceDir, filePath)
         fileWorkMap.set(relPath, { filePath, plan })
         events.emit({
@@ -222,6 +240,9 @@ async function translateFiles(
             jobs: plan.totalJobs,
             pending: plan.items.filter((item) => item.translates).length,
             reused: plan.reusedJobs,
+            estimatedTokens: plan.items
+              .filter((item) => item.translates)
+              .reduce((total, item) => total + item.estimatedTokens, 0),
             writesFile: plan.items.length > 0,
           },
         })
@@ -232,6 +253,8 @@ async function translateFiles(
   )
 
   await planningBarrier.arrive()
+
+  if (config.dryRun) return
 
   const languageResults = await Promise.allSettled(
     plans.map(async ({ targetLang, stateStore, files: fileWorkMap }) => {
@@ -274,7 +297,9 @@ async function translateFiles(
           }
 
           const firstResult = results.find(
-            (result): result is PromiseFulfilledResult<{
+            (
+              result,
+            ): result is PromiseFulfilledResult<{
               filePath: string
               write: () => Promise<void>
             }> => result.status === 'fulfilled',
@@ -333,6 +358,7 @@ async function executeFileWorkItem(
 interface WorkItem {
   label: string
   translates: boolean
+  estimatedTokens: number
   job?: ExecutionJob
   execute: (
     translator?: Translator,
@@ -366,6 +392,10 @@ async function collectFileWorkItemsForFile(
 
 function getFileStateRoot(): string {
   return join(process.cwd(), '.speranto')
+}
+
+function estimateTokens(values: string[]): number {
+  return Math.ceil(values.reduce((total, value) => total + value.length, 0) / 4)
 }
 
 function getTargetPath(
@@ -437,6 +467,7 @@ async function collectMarkdownWorkItems(
     workItems.push({
       label: `${relativePath} chunk ${index + 1}/${chunks.length}`,
       translates: true,
+      estimatedTokens: estimateTokens([chunk.text]),
       job: {
         id: `file:${targetLang}:${relativePath}:chunk:${index}`,
         label: `${relativePath} › chunk ${index + 1}/${chunks.length}`,
@@ -508,45 +539,46 @@ async function collectMarkdownWorkItems(
         totalJobs: chunks.length,
         reusedJobs: chunks.length,
         items: [
-        {
-          label: `${relativePath} restore`,
-          translates: false,
-          execute: async () => ({
-            filePath,
-            write: async () => {
-              const translatedTree: Root = JSON.parse(JSON.stringify(tree))
+          {
+            label: `${relativePath} restore`,
+            translates: false,
+            estimatedTokens: 0,
+            execute: async () => ({
+              filePath,
+              write: async () => {
+                const translatedTree: Root = JSON.parse(JSON.stringify(tree))
 
-              for (const [index, chunk] of chunks.entries()) {
-                const chunkId = getMarkdownChunkStateId(index)
-                const translatedChunkText = translatedChunks.get(chunkId) ?? chunk.text
-                const translatedNodes = await parseMarkdown(translatedChunkText)
+                for (const [index, chunk] of chunks.entries()) {
+                  const chunkId = getMarkdownChunkStateId(index)
+                  const translatedChunkText = translatedChunks.get(chunkId) ?? chunk.text
+                  const translatedNodes = await parseMarkdown(translatedChunkText)
 
-                let nodeIndex = 0
-                for (
-                  let j = chunk.startIndex;
-                  j <= chunk.endIndex && j < translatedTree.children.length;
-                  j++
-                ) {
-                  if (nodeIndex < translatedNodes.children.length) {
-                    translatedTree.children[j] = translatedNodes.children[
-                      nodeIndex
-                    ] as BlockContent
-                    nodeIndex++
+                  let nodeIndex = 0
+                  for (
+                    let j = chunk.startIndex;
+                    j <= chunk.endIndex && j < translatedTree.children.length;
+                    j++
+                  ) {
+                    if (nodeIndex < translatedNodes.children.length) {
+                      translatedTree.children[j] = translatedNodes.children[
+                        nodeIndex
+                      ] as BlockContent
+                      nodeIndex++
+                    }
                   }
                 }
-              }
 
-              let translatedContent = await stringifyMarkdown(translatedTree)
-              translatedContent += `\n\n_Translated automatically with ${config.model}. The original content was written in ${config.sourceLang}. Please allow for minor errors._`
-              await writeOutput(config, filePath, translatedContent, targetLang)
-              stateStore.set(relativePath, {
-                fileHash: sourceFileHash,
-                format: 'md',
-                chunks: nextChunkStates,
-              })
-            },
-          }),
-        },
+                let translatedContent = await stringifyMarkdown(translatedTree)
+                translatedContent += `\n\n_Translated automatically with ${config.model}. The original content was written in ${config.sourceLang}. Please allow for minor errors._`
+                await writeOutput(config, filePath, translatedContent, targetLang)
+                stateStore.set(relativePath, {
+                  fileHash: sourceFileHash,
+                  format: 'md',
+                  chunks: nextChunkStates,
+                })
+              },
+            }),
+          },
         ],
       }
     }
@@ -647,6 +679,7 @@ async function collectJSONWorkItems(
     workItems.push({
       label: `${relativePath} "${group.groupKey}"`,
       translates: true,
+      estimatedTokens: estimateTokens(preparedGroup.changed.map(({ value }) => value)),
       job: {
         id: `file:${targetLang}:${relativePath}:${groupId}`,
         label: `${relativePath} › ${group.groupKey}`,
@@ -717,26 +750,27 @@ async function collectJSONWorkItems(
         totalJobs: allGroups.length,
         reusedJobs: allGroups.length,
         items: [
-        {
-          label: `${relativePath} restore`,
-          translates: false,
-          execute: async () => ({
-            filePath,
-            write: async () => {
-              const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
-              if (excludeKeys?.length && existingTargetJSON) {
-                mergeExcludedKeys(translatedJSON, existingTargetJSON, excludeKeys)
-              }
-              const translatedContent = await stringifyJSON(translatedJSON)
-              await writeOutput(config, filePath, translatedContent, targetLang)
-              stateStore.set(relativePath, {
-                fileHash: sourceFileHash,
-                format: 'json',
-                groups: nextGroupStates,
-              })
-            },
-          }),
-        },
+          {
+            label: `${relativePath} restore`,
+            translates: false,
+            estimatedTokens: 0,
+            execute: async () => ({
+              filePath,
+              write: async () => {
+                const translatedJSON = await reconstructJSON(jsonData, allTranslatedStrings)
+                if (excludeKeys?.length && existingTargetJSON) {
+                  mergeExcludedKeys(translatedJSON, existingTargetJSON, excludeKeys)
+                }
+                const translatedContent = await stringifyJSON(translatedJSON)
+                await writeOutput(config, filePath, translatedContent, targetLang)
+                stateStore.set(relativePath, {
+                  fileHash: sourceFileHash,
+                  format: 'json',
+                  groups: nextGroupStates,
+                })
+              },
+            }),
+          },
         ],
       }
     }
@@ -853,6 +887,7 @@ async function collectJSWorkItems(
     workItems.push({
       label: `${relativePath} "${group.groupKey}"`,
       translates: true,
+      estimatedTokens: estimateTokens(preparedGroup.changed.map(({ value }) => value)),
       job: {
         id: `file:${targetLang}:${relativePath}:${groupId}`,
         label: `${relativePath} › ${group.groupKey}`,
@@ -925,32 +960,33 @@ async function collectJSWorkItems(
         totalJobs: allGroups.length,
         reusedJobs: allGroups.length,
         items: [
-        {
-          label: `${relativePath} restore`,
-          translates: false,
-          execute: async () => ({
-            filePath,
-            write: async () => {
-              const freshAST = await parseJS(content, isTypeScript)
-              const stringsWithExcluded = excludedKeyValues
-                ? [
-                    ...allTranslatedStrings,
-                    ...Array.from(excludedKeyValues.entries()).map(([path, value]) => ({
-                      path,
-                      value,
-                    })),
-                  ]
-                : allTranslatedStrings
-              const translatedContent = await reconstructJS(freshAST, stringsWithExcluded)
-              await writeOutput(config, filePath, translatedContent, targetLang)
-              stateStore.set(relativePath, {
-                fileHash: sourceFileHash,
-                format: 'js',
-                groups: nextGroupStates,
-              })
-            },
-          }),
-        },
+          {
+            label: `${relativePath} restore`,
+            translates: false,
+            estimatedTokens: 0,
+            execute: async () => ({
+              filePath,
+              write: async () => {
+                const freshAST = await parseJS(content, isTypeScript)
+                const stringsWithExcluded = excludedKeyValues
+                  ? [
+                      ...allTranslatedStrings,
+                      ...Array.from(excludedKeyValues.entries()).map(([path, value]) => ({
+                        path,
+                        value,
+                      })),
+                    ]
+                  : allTranslatedStrings
+                const translatedContent = await reconstructJS(freshAST, stringsWithExcluded)
+                await writeOutput(config, filePath, translatedContent, targetLang)
+                stateStore.set(relativePath, {
+                  fileHash: sourceFileHash,
+                  format: 'js',
+                  groups: nextGroupStates,
+                })
+              },
+            }),
+          },
         ],
       }
     }
