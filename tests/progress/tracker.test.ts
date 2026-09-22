@@ -188,3 +188,20 @@ test('plain progress output reports dry-run totals without marking work failed',
   expect(output).toContain('[done] dry run: 2 pending jobs, 0 reused')
   expect(output).not.toContain('failed')
 })
+
+test('interactive progress dashboard does not repeat the Speranto heading', () => {
+  let output = ''
+  const stream = {
+    isTTY: true,
+    write: (chunk: string) => {
+      output += chunk
+      return true
+    },
+  } as unknown as WriteStream
+  const reporter = new TerminalProgressReporter(stream)
+
+  reporter.handle({ type: 'planning-started', sourceLanguages: 1 })
+
+  expect(output).toContain('Planning translation…')
+  expect(output).not.toContain('Speranto')
+})

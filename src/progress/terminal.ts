@@ -99,7 +99,7 @@ class PlainProgressRenderer implements ProgressRenderer {
 
 function buildDashboard(snapshot: ProgressSnapshot): string[] {
   const elapsed = formatDuration(Date.now() - snapshot.startedAt)
-  const lines = ['Speranto', '']
+  const lines: string[] = []
 
   if (snapshot.phase === 'planning') {
     lines.push(snapshot.dryRun ? 'Planning dry run…' : 'Planning translation…')

@@ -156,9 +156,7 @@ program
     }
 
     console.log(`Speranto v${pkg.version}`)
-    console.log(
-      `${config.dryRun ? 'Planning translations' : 'Translating'} from ${config.sourceLang} to ${config.targetLangs.join(', ')} using ${config.model}`,
-    )
+    console.log(`Provider: ${config.provider} · Model: ${config.model}`)
 
     try {
       await orchestrate(config, pkg.version, new TerminalProgressReporter())
