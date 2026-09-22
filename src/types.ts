@@ -3,6 +3,7 @@ export type {
   TableConfig,
   DatabaseConfig,
   FileConfig,
+  OllamaConfig,
   Config as BaseConfig,
 } from './config'
 import type { Config as BaseConfig } from './config'

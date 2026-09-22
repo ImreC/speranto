@@ -7,7 +7,13 @@ import { loadConfig } from './src/util/config'
 import pkg from './package.json' with { type: 'json' }
 import type { Config } from './src/types'
 
-export type { Config, FileConfig, DatabaseConfig, TableConfig } from './src/config'
+export type {
+  Config,
+  FileConfig,
+  DatabaseConfig,
+  TableConfig,
+  OllamaConfig,
+} from './src/config'
 
 const program = new Command()
 
@@ -80,7 +86,7 @@ program
     'LLM provider (openai, ollama, mistral, or any OpenAI-compatible)',
   )
   .option('-k, --api-key <key>', 'API key for LLM provider')
-  .option('-b, --base-url <url>', 'Base URL for OpenAI-compatible API')
+  .option('-b, --base-url <url>', 'Base URL for the LLM provider')
   .option('-i, --instructions-dir <path>', 'Directory containing language instruction files')
   .option(
     '-n, --concurrency <number>',
@@ -92,14 +98,19 @@ program
   .option('--init', 'Build state from existing translations without translating')
   .action(async (options) => {
     const passedConfig = await loadConfig(options.config)
+    const provider = options.provider || passedConfig.provider || 'mistral'
 
     const config: Config = {
-      model: options.model || passedConfig.model || 'mistral-large-latest',
+      model:
+        options.model ||
+        passedConfig.model ||
+        (provider === 'ollama' ? 'gemma3:4b' : 'mistral-large-latest'),
       sourceLang: options.sourceLang || passedConfig.sourceLang || 'en',
       targetLangs: options.targetLangs || passedConfig.targetLangs || ['es'],
-      provider: options.provider || passedConfig.provider || 'mistral',
+      provider,
       apiKey: options.apiKey || passedConfig.apiKey,
       baseUrl: options.baseUrl || passedConfig.baseUrl,
+      ollama: passedConfig.ollama,
       concurrency: options.concurrency ?? passedConfig.concurrency,
       timeout: passedConfig.timeout,
       verbose: options.verbose || passedConfig.verbose || false,
@@ -124,6 +135,7 @@ program
         provider: config.provider,
         apiKey: config.apiKey ? '[set]' : undefined,
         baseUrl: config.baseUrl,
+        ollama: config.ollama,
         concurrency: config.concurrency,
         timeout: config.timeout,
         instructionsDir: config.instructionsDir,

@@ -51,6 +51,18 @@ export interface FileConfig {
   excludeKeys?: string[]
 }
 
+/** Ollama-specific local model settings. */
+export interface OllamaConfig {
+  /** Download the configured model when it is not installed (defaults to false) */
+  autoPull?: boolean
+  /** How long Ollama should keep the model loaded, such as '10m' */
+  keepAlive?: string | number
+  /** Context window size passed to Ollama */
+  contextLength?: number
+  /** Sampling temperature passed to Ollama */
+  temperature?: number
+}
+
 /**
  * Main configuration for Speranto.
  *
@@ -83,8 +95,10 @@ export interface Config {
   provider: string
   /** API key for the LLM provider */
   apiKey?: string
-  /** Base URL for OpenAI-compatible API (overrides provider default) */
+  /** Base URL for the LLM provider (overrides provider default) */
   baseUrl?: string
+  /** Ollama-specific settings */
+  ollama?: OllamaConfig
   /** Maximum concurrent LLM calls across all languages and sources (default 5, local default 1) */
   concurrency?: number
   /** Request timeout in milliseconds (default: 600000 / 10 minutes) */

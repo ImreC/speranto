@@ -1,7 +1,7 @@
 export interface LLMGenerateOptions {
   maxTokens?: number
   executionLabel?: string
-  [key: string]: any
+  output?: 'text' | 'json'
 }
 
 export interface LLMResponse {

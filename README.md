@@ -215,20 +215,21 @@ export default config
 
 #### Configuration Options
 
-| Option            | Type       | Description                                                                 |
-| ----------------- | ---------- | --------------------------------------------------------------------------- |
-| `model`           | `string`   | The AI model to use for translation                                         |
-| `sourceLang`      | `string`   | Source language code (e.g., `'en'` for English)                             |
-| `targetLangs`     | `string[]` | Array of target language codes                                              |
-| `provider`        | `string`   | LLM provider: `'openai'`, `'ollama'`, `'mistral'`, or any OpenAI-compatible |
-| `apiKey`          | `string`   | API key for the LLM provider                                                |
-| `baseUrl`         | `string`   | Base URL for OpenAI-compatible APIs (overrides provider default)            |
-| `concurrency`     | `number`   | Global concurrent LLM call limit across languages and sources (default: `5`, local: `1`) |
-| `timeout`         | `number`   | Request timeout in milliseconds (default: `600000` / 10 minutes)            |
-| `verbose`         | `boolean`  | Print the resolved configuration with secrets redacted                      |
-| `retranslate`     | `boolean`  | Force retranslation of all values, even if already translated               |
-| `init`            | `boolean`  | Build state from existing translations without translating                  |
-| `instructionsDir` | `string`   | Directory containing language-specific instruction files (see below)        |
+| Option            | Type       | Description                                                                     |
+| ----------------- | ---------- | ------------------------------------------------------------------------------- |
+| `model`           | `string`   | The AI model to use for translation                                             |
+| `sourceLang`      | `string`   | Source language code (e.g., `'en'` for English)                                 |
+| `targetLangs`     | `string[]` | Array of target language codes                                                  |
+| `provider`        | `string`   | LLM provider: `'openai'`, `'ollama'`, `'mistral'`, or any OpenAI-compatible     |
+| `apiKey`          | `string`   | API key for the LLM provider                                                    |
+| `baseUrl`         | `string`   | Provider base URL (overrides the provider default)                              |
+| `ollama`          | `object`   | Ollama model lifecycle and inference settings (see below)                       |
+| `concurrency`     | `number`   | Global LLM call limit across languages and sources (default: `5`, local: `1`)   |
+| `timeout`         | `number`   | Request timeout in milliseconds (default: `600000` / 10 minutes)                |
+| `verbose`         | `boolean`  | Print the resolved configuration with secrets redacted                          |
+| `retranslate`     | `boolean`  | Force retranslation of all values, even if already translated                   |
+| `init`            | `boolean`  | Build state from existing translations without translating                      |
+| `instructionsDir` | `string`   | Directory containing language-specific instruction files (see below)            |
 
 #### File Translation Options (`files`)
 
@@ -252,6 +253,47 @@ Target languages, files, and database tables are prepared concurrently. All LLM 
 through one global FIFO queue, so increasing parallelism never multiplies `concurrency` by the
 number of languages. Local Ollama and localhost endpoints default to one active request; set
 `concurrency` explicitly when the local server supports continuous batching.
+
+#### Ollama
+
+Ollama runs translations locally without an API key. Install and start Ollama, then configure an
+instruction-following model:
+
+```typescript
+const config: Config = {
+  provider: 'ollama',
+  model: 'gemma3:4b',
+  sourceLang: 'en',
+  targetLangs: ['nl'],
+  instructionsDir: './instructions',
+  ollama: {
+    autoPull: false,
+    keepAlive: '10m',
+    contextLength: 8192,
+    temperature: 0.2,
+  },
+  files: {
+    sourceDir: './content',
+    targetDir: './content/[lang]',
+  },
+}
+```
+
+Speranto checks that the Ollama server is reachable and that the configured model is installed.
+When `autoPull` is `false` (the default), a missing model produces the exact `ollama pull` command
+to run. Set it to `true` to let Speranto download a missing model automatically. JSON translation
+groups use Ollama's native JSON output mode.
+
+| Ollama option   | Type               | Description                                               |
+| --------------- | ------------------ | --------------------------------------------------------- |
+| `autoPull`      | `boolean`          | Download a missing model automatically (default: `false`) |
+| `keepAlive`     | `string \| number` | How long Ollama keeps the model loaded                     |
+| `contextLength` | `number`           | Context window passed as Ollama's `num_ctx`                |
+| `temperature`   | `number`           | Sampling temperature passed to Ollama                      |
+
+Use `baseUrl` for a remote server or a Docker hostname, for example
+`http://ollama:11434`. Set `apiKey` only when an authenticated proxy or hosted Ollama endpoint
+requires it.
 
 ### Language-Specific Instructions
 

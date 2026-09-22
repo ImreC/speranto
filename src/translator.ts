@@ -3,10 +3,12 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { LLMInterface } from './interface'
 import { OpenAICompatibleProvider } from './interface/openai-compatible'
+import { OllamaProvider } from './interface/ollama'
 import { ScheduledLLM } from './interface/scheduled'
 import { RequestScheduler } from './execution/scheduler'
 import type { ExecutionJob } from './execution/events'
 import type { TranslatableChunk } from './parsers/md'
+import type { OllamaConfig } from './config'
 
 interface TranslatorOptions {
   model: string
@@ -16,6 +18,7 @@ interface TranslatorOptions {
   baseUrl?: string
   apiKey?: string
   timeout?: number
+  ollama?: OllamaConfig
   llm?: LLMInterface
   instructionsDir?: string
   retranslate?: boolean
@@ -42,6 +45,15 @@ export class Translator {
   }
 
   private createLLMProvider(): LLMInterface {
+    if (this.options.provider === 'ollama') {
+      return new OllamaProvider(this.options.model, {
+        apiKey: this.options.apiKey,
+        baseUrl: this.options.baseUrl,
+        timeout: this.options.timeout,
+        ollama: this.options.ollama,
+      })
+    }
+
     const provider = new OpenAICompatibleProvider(this.options.model, {
       apiKey: this.options.apiKey,
       baseUrl: this.options.baseUrl,
@@ -127,6 +139,7 @@ export class Translator {
 
     const response = await this.llm.generate(prompt, {
       executionLabel: `${groupKey} → ${this.options.targetLang}`,
+      output: 'json',
     })
 
     return this.parseGroupResponse(response.content, strings)
@@ -172,6 +185,7 @@ export class Translator {
 
     const response = await this.llm.generate(prompt, {
       executionLabel: `${groupKey} → ${this.options.targetLang}`,
+      output: 'json',
     })
 
     return this.parseGroupResponse(response.content, changedStrings)

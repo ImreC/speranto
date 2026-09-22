@@ -352,6 +352,7 @@ function getTranslator(
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
     timeout: config.timeout,
+    ollama: config.ollama,
     llm: config.llm,
     instructionsDir: config.instructionsDir,
     retranslate: config.retranslate,
