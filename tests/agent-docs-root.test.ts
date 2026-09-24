@@ -17,6 +17,17 @@ async function createPackage(path: string, name: string): Promise<void> {
   await writeFile(join(path, 'package.json'), JSON.stringify({ name }))
 }
 
+async function createSperantoConsumer(path: string, name: string): Promise<void> {
+  await mkdir(path, { recursive: true })
+  await writeFile(
+    join(path, 'package.json'),
+    JSON.stringify({
+      name,
+      dependencies: { '@speranto/speranto': '^0.4.0' },
+    }),
+  )
+}
+
 async function createWorkspacePackage(
   path: string,
   workspaces: string[] | { packages: string[] },
@@ -39,6 +50,59 @@ test(
     await createPackage(dependencyRoot, 'frontend')
 
     await expect(resolveAgentDocsRoots(dependencyRoot)).resolves.toEqual({
+      dependencyRoot,
+      projectRoot: workspaceRoot,
+    })
+  },
+)
+
+test(
+  'finds a nested pnpm workspace dependency when installation starts at the root',
+  async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'speranto-workspace-'))
+    temporaryDirectories.push(workspaceRoot)
+    const dependencyRoot = join(workspaceRoot, 'apps', 'frontend')
+    await createPackage(workspaceRoot, 'consumer-workspace')
+    await writeFile(
+      join(workspaceRoot, 'pnpm-workspace.yaml'),
+      "packages:\n  - 'apps/*'\n",
+    )
+    await createSperantoConsumer(dependencyRoot, 'frontend')
+
+    await expect(resolveAgentDocsRoots(workspaceRoot)).resolves.toEqual({
+      dependencyRoot,
+      projectRoot: workspaceRoot,
+    })
+  },
+)
+
+test('keeps the workspace root when it directly depends on Speranto', async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'speranto-workspace-'))
+  temporaryDirectories.push(workspaceRoot)
+  const nestedRoot = join(workspaceRoot, 'apps', 'frontend')
+  await createSperantoConsumer(workspaceRoot, 'consumer-workspace')
+  await writeFile(join(workspaceRoot, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n')
+  await createSperantoConsumer(nestedRoot, 'frontend')
+
+  await expect(resolveAgentDocsRoots(workspaceRoot)).resolves.toEqual({
+    dependencyRoot: workspaceRoot,
+    projectRoot: workspaceRoot,
+  })
+})
+
+test.each([
+  { name: 'array', workspaces: ['apps/*'] },
+  { name: 'object', workspaces: { packages: ['apps/*'] } },
+])(
+  'finds a nested dependency from package.json workspaces with the $name form',
+  async ({ workspaces }) => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'speranto-workspace-'))
+    temporaryDirectories.push(workspaceRoot)
+    const dependencyRoot = join(workspaceRoot, 'apps', 'frontend')
+    await createWorkspacePackage(workspaceRoot, workspaces)
+    await createSperantoConsumer(dependencyRoot, 'frontend')
+
+    await expect(resolveAgentDocsRoots(workspaceRoot)).resolves.toEqual({
       dependencyRoot,
       projectRoot: workspaceRoot,
     })
