@@ -187,3 +187,37 @@ test('postinstall skips projects where Speranto is not a direct dependency', asy
   expect(result.status).toBe('skipped')
   await expect(access(join(projectRoot, '.agents', 'speranto', 'guide.md'))).rejects.toThrow()
 })
+
+test(
+  'postinstall validates a nested dependency while installing at the workspace root',
+  async () => {
+    const { projectRoot, sourceGuidePath } = await createProject()
+    const dependencyRoot = join(projectRoot, 'apps', 'frontend')
+    await writeFile(
+      join(projectRoot, 'package.json'),
+      JSON.stringify({ name: 'consumer-workspace', private: true }),
+    )
+    await mkdir(dependencyRoot, { recursive: true })
+    await writeFile(
+      join(dependencyRoot, 'package.json'),
+      JSON.stringify({
+        name: 'frontend',
+        dependencies: { '@speranto/speranto': '^0.4.0' },
+      }),
+    )
+
+    const result = await manageAgentDocs({
+      projectRoot,
+      dependencyRoot,
+      sourceGuidePath,
+      packageVersion: '0.4.0',
+      postinstall: true,
+    })
+
+    expect(result.status).toBe('installed')
+    expect(await readFile(join(projectRoot, 'AGENTS.md'), 'utf-8')).toContain(
+      '@.agents/speranto/guide.md',
+    )
+    await expect(access(join(dependencyRoot, 'AGENTS.md'))).rejects.toThrow()
+  },
+)

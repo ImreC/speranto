@@ -26,6 +26,7 @@
   "files": [
     "dist",
     "docs/agent-guide.md",
+    "scripts/agent-docs-root.mjs",
     "scripts/install-agent-docs.mjs"
   ],
   "exports": {

@@ -46,6 +46,7 @@ interface InstructionPlan {
 export interface ManageAgentDocsOptions {
   mode?: AgentDocsMode
   projectRoot?: string
+  dependencyRoot?: string
   sourceGuidePath?: string
   packageVersion?: string
   postinstall?: boolean
@@ -397,13 +398,20 @@ export async function manageAgentDocs(
     await findProjectRoot(options.projectRoot ?? process.cwd()),
   )
   const projectManifest = await readJSON<PackageManifest>(join(projectRoot, 'package.json'))
+  const dependencyRoot = options.dependencyRoot
+    ? await realpath(await findProjectRoot(options.dependencyRoot))
+    : projectRoot
+  const dependencyManifest =
+    dependencyRoot === projectRoot
+      ? projectManifest
+      : await readJSON<PackageManifest>(join(dependencyRoot, 'package.json'))
 
   if (
     options.postinstall &&
     (process.env.SPERANTO_SKIP_AGENT_DOCS === '1' ||
       process.env.SPERANTO_SKIP_AGENT_DOCS === 'true' ||
-      projectManifest.name === packageName ||
-      !hasDirectDependency(projectManifest))
+      dependencyManifest.name === packageName ||
+      !hasDirectDependency(dependencyManifest))
   ) {
     return {
       status: 'skipped',

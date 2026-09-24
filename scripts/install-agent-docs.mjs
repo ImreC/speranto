@@ -1,65 +1,48 @@
 #!/usr/bin/env node
-import { lstat, readFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-
-async function pathExists(path) {
-  try {
-    await lstat(path)
-    return true
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      return false
-    }
-    throw error
-  }
-}
-
-async function findProjectRoot(startPath) {
-  let currentPath = resolve(startPath)
-  while (true) {
-    if (await pathExists(join(currentPath, 'package.json'))) {
-      return currentPath
-    }
-    const parentPath = dirname(currentPath)
-    if (parentPath === currentPath) {
-      return undefined
-    }
-    currentPath = parentPath
-  }
-}
+import { resolveAgentDocsRoots } from './agent-docs-root.mjs'
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const projectStart =
-  process.env.SPERANTO_PROJECT_ROOT ??
+const dependencyStart =
   process.env.INIT_CWD ??
-  process.env.npm_config_local_prefix
+  process.env.npm_config_local_prefix ??
+  process.env.SPERANTO_PROJECT_ROOT
 
-if (projectStart) {
+if (dependencyStart) {
   try {
-    const projectRoot = await findProjectRoot(projectStart)
-    if (projectRoot && projectRoot !== packageRoot) {
-      const projectManifest = JSON.parse(
-        await readFile(join(projectRoot, 'package.json'), 'utf-8'),
-      )
-      const dependencyGroups = [
-        projectManifest.dependencies,
-        projectManifest.devDependencies,
-        projectManifest.optionalDependencies,
-      ]
+    const roots = await resolveAgentDocsRoots(
+      dependencyStart,
+      process.env.SPERANTO_PROJECT_ROOT,
+    )
+    if (roots && roots.dependencyRoot !== packageRoot) {
+      const { manageAgentDocs } = await import('../dist/agent-docs.mjs')
+      const installResult = await manageAgentDocs({
+        projectRoot: roots.projectRoot,
+        dependencyRoot: roots.dependencyRoot,
+        postinstall: true,
+      })
+      const warnings = [...installResult.warnings]
+      let changed = installResult.changedFiles.length > 0
+
       if (
-        dependencyGroups.some(
-          (dependencies) => dependencies && '@speranto/speranto' in dependencies,
-        )
+        installResult.status !== 'skipped' &&
+        installResult.warnings.length === 0 &&
+        roots.projectRoot !== roots.dependencyRoot
       ) {
-        const { manageAgentDocs } = await import('../dist/agent-docs.mjs')
-        const result = await manageAgentDocs({ projectRoot, postinstall: true })
-        for (const warning of result.warnings) {
-          process.stderr.write(`[speranto] ${warning}\n`)
-        }
-        if (result.changedFiles.length > 0) {
-          process.stdout.write('[speranto] Agent documentation is up to date.\n')
-        }
+        const removalResult = await manageAgentDocs({
+          mode: 'remove',
+          projectRoot: roots.dependencyRoot,
+        })
+        warnings.push(...removalResult.warnings)
+        changed ||= removalResult.changedFiles.length > 0
+      }
+
+      for (const warning of warnings) {
+        process.stderr.write(`[speranto] ${warning}\n`)
+      }
+      if (changed) {
+        process.stdout.write('[speranto] Agent documentation is up to date.\n')
       }
     }
   } catch (error) {

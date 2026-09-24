@@ -57,6 +57,13 @@ When working with localization, Speranto configuration, or translated content, r
 <!-- speranto-agent-docs:end -->
 ```
 
+In a workspace, the hook verifies the dependency against the package where Speranto was
+installed, then places the documentation at the nearest workspace root. It recognizes
+`pnpm-workspace.yaml` and the `package.json` `workspaces` formats used by npm, Yarn, Bun, and
+workspace-based build tools. Previously managed files in the package directory are removed during
+this migration without deleting user-authored content. Set `SPERANTO_PROJECT_ROOT` to override the
+documentation destination explicitly.
+
 If `CLAUDE.md` already imports `AGENTS.md` using Claude's `@AGENTS.md` syntax, only `AGENTS.md`
 is updated. Repeated installation is idempotent, and updating the package replaces the managed
 guide with the canonical guide from the installed version.
@@ -69,6 +76,7 @@ command is run directly.
 | --------------- | -------------------------------------------- | --------------------------------------------------------------------------------------- |
 | npm             | Reports and skips unapproved install scripts | `npm install-scripts approve @speranto/speranto`, then `npm rebuild @speranto/speranto` |
 | pnpm            | Reports dependencies awaiting build approval | `pnpm approve-builds @speranto/speranto`                                                |
+| Bun             | Blocks untrusted dependency lifecycle scripts | `bun pm trust @speranto/speranto`                                                       |
 | Yarn 4.14+      | Disables third-party postinstall scripts     | Set `dependenciesMeta["@speranto/speranto"].built` to `true`, then run `yarn install`   |
 
 For Yarn, add the approval to the consuming project's top-level `package.json`:
