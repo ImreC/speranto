@@ -3,6 +3,7 @@ export {
   type SourceRow,
   type TranslationRow,
   type StoredTranslationRow,
+  type TranslationKey,
 } from './adapter'
 export { SQLiteAdapter } from './sqlite'
 export { PostgresAdapter } from './postgres'

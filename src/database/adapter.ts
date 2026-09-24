@@ -17,6 +17,11 @@ export interface TranslationRow {
 
 export interface StoredTranslationRow extends TranslationRow {}
 
+export interface TranslationKey {
+  sourceId: string | number
+  lang: string
+}
+
 export abstract class DatabaseAdapter {
   abstract connect(): Promise<void>
   abstract close(): Promise<void>
@@ -33,6 +38,12 @@ export abstract class DatabaseAdapter {
   abstract upsertTranslation(
     table: TableConfig,
     translation: TranslationRow,
+    suffix: string,
+  ): Promise<void>
+
+  abstract deleteTranslations(
+    table: TableConfig,
+    translations: TranslationKey[],
     suffix: string,
   ): Promise<void>
 

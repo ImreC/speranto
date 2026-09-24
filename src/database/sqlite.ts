@@ -4,6 +4,7 @@ import {
   DatabaseAdapter,
   type SourceRow,
   type StoredTranslationRow,
+  type TranslationKey,
   type TranslationRow,
 } from './adapter'
 import type { TableConfig } from '../types'
@@ -198,6 +199,29 @@ export class SQLiteAdapter extends DatabaseAdapter {
     ]
 
     this.db.run(sql, values)
+    this.save()
+  }
+
+  async deleteTranslations(
+    table: TableConfig,
+    translations: TranslationKey[],
+    suffix: string,
+  ): Promise<void> {
+    if (!this.db || translations.length === 0) return
+
+    const translationTable = this.getTranslationTableName(table, suffix)
+    const sql = `DELETE FROM ${translationTable} WHERE source_id = ? AND lang = ?`
+
+    this.db.run('BEGIN TRANSACTION')
+    try {
+      for (const translation of translations) {
+        this.db.run(sql, [String(translation.sourceId), translation.lang])
+      }
+      this.db.run('COMMIT')
+    } catch (error) {
+      this.db.run('ROLLBACK')
+      throw error
+    }
     this.save()
   }
 

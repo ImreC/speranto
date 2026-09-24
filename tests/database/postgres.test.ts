@@ -166,3 +166,31 @@ test('pg - getTranslations returns empty list for non-existent translations', as
   const translations = await adapter.getTranslations(articlesTable, '_translations')
   expect(translations).toHaveLength(0)
 })
+
+test('pg - deleteTranslations removes only the requested translations', async () => {
+  await adapter.ensureTranslationTable(articlesTable, '_translations')
+
+  for (const lang of ['es', 'fr']) {
+    await adapter.upsertTranslation(
+      articlesTable,
+      {
+        sourceId: 1,
+        lang,
+        sourceLang: 'en',
+        rowSourceHash: 'row-hash',
+        fieldSourceHashes: {},
+        columns: { title: lang, body: lang },
+      },
+      '_translations',
+    )
+  }
+
+  await adapter.deleteTranslations(
+    articlesTable,
+    [{ sourceId: 1, lang: 'fr' }],
+    '_translations',
+  )
+
+  const translations = await adapter.getTranslations(articlesTable, '_translations')
+  expect(translations.map(({ lang }) => lang)).toEqual(['es'])
+})

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
+import { createInterface } from 'node:readline/promises'
 import { Command, InvalidArgumentError } from 'commander'
 import { manageAgentDocs } from './src/agent-docs'
+import { cleanupDatabase, type DatabaseCleanupPlan } from './src/database-cleanup'
 import { orchestrate } from './src/orchestrate'
 import { TerminalProgressReporter } from './src/progress/terminal'
 import { loadConfig } from './src/util/config'
@@ -70,6 +72,76 @@ program
       process.exitCode = 1
     }
   })
+
+program
+  .command('cleanup')
+  .description('Remove stale database translation rows')
+  .option('-c, --config <path>', 'Path to the Speranto config file')
+  .option('-y, --yes', 'Approve deletion without prompting')
+  .action(async (_options: { config?: string; yes?: boolean }, command: Command) => {
+    const cleanupOptions = command.optsWithGlobals() as {
+      config?: string
+      yes?: boolean
+    }
+    const passedConfig = await loadConfig(cleanupOptions.config)
+    if (!passedConfig.database) {
+      process.stderr.write('Error: No database translation source configured.\n')
+      process.exitCode = 1
+      return
+    }
+
+    try {
+      const result = await cleanupDatabase(
+        {
+          sourceLang: passedConfig.sourceLang || 'en',
+          targetLangs: passedConfig.targetLangs || ['es'],
+          database: passedConfig.database,
+        },
+        async (plan) =>
+          confirmDatabaseCleanup(
+            plan,
+            cleanupOptions.yes ?? false,
+            passedConfig.database.translationTableSuffix || '_translations',
+          ),
+      )
+
+      if (result.total === 0) {
+        process.stdout.write('No stale database translation rows found.\n')
+      } else if (result.approved) {
+        process.stdout.write(`Deleted ${result.total} stale database translation row(s).\n`)
+      } else {
+        process.stdout.write('Cleanup cancelled; no rows were deleted.\n')
+      }
+    } catch (error) {
+      process.stderr.write(`Error: ${error instanceof Error ? error.message : error}\n`)
+      process.exitCode = 1
+    }
+  })
+
+async function confirmDatabaseCleanup(
+  plan: DatabaseCleanupPlan,
+  approvedWithoutPrompt: boolean,
+  translationTableSuffix: string,
+): Promise<boolean> {
+  process.stdout.write(`Found ${plan.total} stale database translation row(s):\n`)
+  for (const { table, translations } of plan.tables) {
+    if (translations.length === 0) continue
+    const tableName = table.schema
+      ? `${table.schema}.${table.name}${translationTableSuffix}`
+      : `${table.name}${translationTableSuffix}`
+    process.stdout.write(`  ${tableName}: ${translations.length}\n`)
+  }
+
+  if (approvedWithoutPrompt) return true
+
+  const readline = createInterface({ input: process.stdin, output: process.stdout })
+  try {
+    const answer = await readline.question('Delete these rows? [y/N] ')
+    return /^(y|yes)$/i.test(answer.trim())
+  } finally {
+    readline.close()
+  }
+}
 
 program
   .option(
@@ -166,4 +238,4 @@ program
     }
   })
 
-program.parse()
+await program.parseAsync()
