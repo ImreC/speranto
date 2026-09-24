@@ -3,6 +3,7 @@ import {
   DatabaseAdapter,
   type SourceRow,
   type StoredTranslationRow,
+  type TranslationKey,
   type TranslationRow,
 } from './adapter'
 import type { TableConfig } from '../types'
@@ -196,6 +197,31 @@ export class PostgresAdapter extends DatabaseAdapter {
       values,
     )
   }
+
+  async deleteTranslations(
+    table: TableConfig,
+    translations: TranslationKey[],
+    suffix: string,
+  ): Promise<void> {
+    if (!this.client || translations.length === 0) return
+
+    const translationTable = this.getQualifiedTableName(table, suffix)
+
+    await this.client.query('BEGIN')
+    try {
+      for (const translation of translations) {
+        await this.client.query(
+          `DELETE FROM ${translationTable} WHERE source_id = $1 AND lang = $2`,
+          [String(translation.sourceId), translation.lang],
+        )
+      }
+      await this.client.query('COMMIT')
+    } catch (error) {
+      await this.client.query('ROLLBACK')
+      throw error
+    }
+  }
+
   override async upsertTranslations(
     table: TableConfig,
     translations: TranslationRow[],

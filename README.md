@@ -488,6 +488,26 @@ Database change detection is hash-based:
 If `langColumn` is configured, Speranto uses the row value as the source language for that record;
 otherwise it falls back to the global `sourceLang`.
 
+### Cleaning Up Database Translations
+
+Speranto does not delete translation rows during normal translation runs. Use the dedicated cleanup
+command to remove rows for deleted source records and languages that are no longer the source
+language or one of the configured target languages:
+
+```bash
+speranto cleanup
+```
+
+The command displays the number of stale rows per table and asks for confirmation before deleting
+anything. Enter `y` or `yes` to approve. For non-interactive environments, pass `--yes` to approve
+the displayed cleanup automatically:
+
+```bash
+speranto cleanup --yes
+```
+
+Use `--config <path>` when the configuration is not in the current directory.
+
 ### Database Test Commands
 
 The full test script starts PostgreSQL and runs all tests:
